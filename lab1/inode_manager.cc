@@ -306,7 +306,7 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
 #define MIN(a,b) ((a)<(b) ? (a) : (b))
 
 /* Get all the data of a file by inum.
- * Return alloced data, should be freed by caller. */
+ * Return allocated data, should be freed by caller. */
 void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
 {
     /*
@@ -314,6 +314,50 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
      * note: read blocks related to inode number inum,
      * and copy them to buf_out
      */
+
+    inode_t* ino = get_inode(inum);
+    if (!ino) {
+        printf("\tim: bad inode\n");
+        return;
+    }
+
+    int read_size = MIN(*(uint*)size, ino->size);
+    *size = read_size;
+    *buf_out = (char*)malloc(read_size);
+    char *p = *buf_out;
+    char buf[BLOCK_SIZE], ind_buf[BLOCK_SIZE];
+
+    int whole_blocks = read_size / BLOCK_SIZE;
+
+    if (whole_blocks < NDIRECT) {
+        for (int i = 0; i < whole_blocks; ++i) {
+            bm->read_block(ino->blocks[i], buf);
+            memcpy(p, buf, BLOCK_SIZE);
+            p += BLOCK_SIZE;
+        }
+
+        bm->read_block(ino->blocks[whole_blocks], buf);
+        memcpy(p, buf, read_size % BLOCK_SIZE);
+    } else {
+        for (int i = 0; i < NDIRECT; ++i) {
+            bm->read_block(ino->blocks[i], buf);
+            memcpy(p, buf, BLOCK_SIZE);
+            p += BLOCK_SIZE;
+        }
+
+        bm->read_block(ino->blocks[NDIRECT], ind_buf);
+
+        for (int i = 0; i < whole_blocks - NDIRECT; ++i) {
+            bm->read_block(*((uint*)ind_buf + i), buf);
+            memcpy(p, buf, BLOCK_SIZE);
+            p += BLOCK_SIZE;
+        }
+
+        bm->read_block(*((uint*)ind_buf + whole_blocks - NDIRECT), buf);
+        memcpy(p, buf, read_size % BLOCK_SIZE);
+    }
+
+    // ### Need to set atime?
 }
 
 /* alloc/free blocks if needed */

@@ -55,6 +55,7 @@ int block_manager::least_available_in_block(const char *block_buf)
 int block_manager::find_available_slot()
 {
     int pos = 1;
+    int newid;
     char buf[BLOCK_SIZE];
 
     do {
@@ -205,7 +206,30 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
 
      * if you get some heap memory, do not forget to free it.
      */
-    return 1;
+
+    int newinum = 0;
+    int pos;
+    char buf[BLOCK_SIZE];
+    inode_t ino;
+
+    do {
+        ++newinum;
+        pos = IBLOCK(newinum, bm->sb.nblocks);
+        bm->read_block(pos, buf);
+    } while (buf[0] && newinum < INODE_NUM);
+
+    if (newinum == INODE_NUM) {
+        printf("Error: no inode numbers avaliable!\n");
+        exit(-1);
+    }
+
+    buf[0] = 0x1;
+    bzero(&ino, sizeof(inode_t));
+    ino.type = type;
+    memcpy(buf + 1, &ino, sizeof(inode_t));
+    bm->write_block(pos, buf);
+
+    return newinum;
 }
 
 void inode_manager::free_inode(uint32_t inum)
@@ -295,6 +319,23 @@ void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
      * note: get the attributes of inode inum.
      * you can refer to "struct attr" in extent_protocol.h
      */
+    
+    char buf[BLOCK_SIZE];
+    inode_t* ino;
+
+    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
+
+    if (!buf[0]) {
+        printf("Error: invalid inode!\n");
+        exit(-1);
+    }
+
+    ino = (inode_t*)(buf + 1);
+    a.type = ino->type;
+    a.atime = ino->atime;
+    a.mtime = ino->mtime;
+    a.ctime = ino->ctime;
+    a.size = ino->size;
 }
 
 void inode_manager::remove_file(uint32_t inum)

@@ -160,7 +160,7 @@ block_manager::block_manager()
     sb.nblocks = BLOCK_NUM;
     sb.ninodes = INODE_NUM;
 
-    mark_as_allocated_batch(2 + BITMAP_BLOCKS + INODE_NUM);
+    mark_as_allocated_batch(2 + BITMAP_BLOCKS + INODE_NUM / IPB);
 }
 
 block_manager::~block_manager()
@@ -210,23 +210,22 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
     int newinum = 0;
     int pos;
     char buf[BLOCK_SIZE];
-    inode_t ino;
+    inode_t *ino;
 
     do {
         ++newinum;
         pos = IBLOCK(newinum, bm->sb.nblocks);
         bm->read_block(pos, buf);
-    } while (buf[0] && newinum < INODE_NUM);
+        ino = (inode_t*)buf + (newinum - 1) % IPB;
+    } while (ino->type && newinum < INODE_NUM);
 
     if (newinum == INODE_NUM) {
         printf("Error: no inode numbers avaliable!\n");
         exit(-1);
     }
 
-    buf[0] = 0x1;
-    bzero(&ino, sizeof(inode_t));
-    ino.type = type;
-    memcpy(buf + 1, &ino, sizeof(inode_t));
+    bzero(ino, sizeof(inode_t));
+    ino->type = type;
     bm->write_block(pos, buf);
 
     return newinum;
@@ -240,6 +239,17 @@ void inode_manager::free_inode(uint32_t inum)
      * if not, clear it, and remember to write back to disk.
      * do not forget to free memory if necessary.
      */
+
+    if (inum < 1 || inum > INODE_NUM)
+        return;
+
+    char buf[BLOCK_SIZE];
+    int pos = IBLOCK(inum, bm->sb.nblocks);
+
+    bm->read_block(pos, buf);
+    inode_t *ino = (inode_t*)buf + (inum - 1) % IPB;
+    ino->type = 0;
+    bm->write_block(pos, buf);
 }
 
 
@@ -252,7 +262,7 @@ struct inode* inode_manager::get_inode(uint32_t inum)
 
     printf("\tim: get_inode %d\n", inum);
 
-    if (inum < 0 || inum >= INODE_NUM) {
+    if (inum < 1 || inum > INODE_NUM) {
         printf("\tim: inum out of range\n");
         return NULL;
     }
@@ -260,7 +270,7 @@ struct inode* inode_manager::get_inode(uint32_t inum)
     bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
     // printf("%s:%d\n", __FILE__, __LINE__);
 
-    ino_disk = (struct inode*)buf + inum % IPB;
+    ino_disk = (struct inode*)buf + (inum - 1) % IPB;
     if (ino_disk->type == 0) {
         printf("\tim: inode not exist\n");
         return NULL;
@@ -278,11 +288,17 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
     struct inode *ino_disk;
 
     printf("\tim: put_inode %d\n", inum);
+
+    if (inum < 1 || inum > INODE_NUM) {
+        printf("\tim: inum out of range\n");
+        return;
+    }
+
     if (ino == NULL)
         return;
 
     bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
-    ino_disk = (struct inode*)buf + inum % IPB;
+    ino_disk = (struct inode*)buf + (inum - 1) % IPB;
     *ino_disk = *ino;
     bm->write_block(IBLOCK(inum, bm->sb.nblocks), buf);
 }
@@ -320,22 +336,19 @@ void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
      * you can refer to "struct attr" in extent_protocol.h
      */
     
-    char buf[BLOCK_SIZE];
-    inode_t* ino;
-
-    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
-
-    if (!buf[0]) {
-        printf("Error: invalid inode!\n");
-        exit(-1);
+    inode_t* ino = get_inode(inum);
+    if (!ino) {
+        printf("\tim: bad inode\n");
+        return;
     }
 
-    ino = (inode_t*)(buf + 1);
     a.type = ino->type;
     a.atime = ino->atime;
     a.mtime = ino->mtime;
     a.ctime = ino->ctime;
     a.size = ino->size;
+
+    free(ino);
 }
 
 void inode_manager::remove_file(uint32_t inum)

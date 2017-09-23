@@ -4,11 +4,14 @@
 #define inode_h
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "extent_protocol.h"
 
 #define DISK_SIZE  1024*1024*16
 #define BLOCK_SIZE 512
 #define BLOCK_NUM  (DISK_SIZE/BLOCK_SIZE)
+#define BITMAP_BLOCKS (BLOCK_NUM/8)
 
 typedef uint32_t blockid_t;
 
@@ -36,8 +39,14 @@ class block_manager {
  private:
   disk *d;
   std::map <uint32_t, int> using_blocks;
+  int least_available_in_block(const char *block_buf);
+  int find_available_slot();
+  void mark_as_allocated(uint32_t id);
+  void mark_as_allocated_batch(uint32_t to_id);
+  void mark_as_free(uint32_t id);
  public:
   block_manager();
+  ~block_manager();
   struct superblock sb;
 
   uint32_t alloc_block();
@@ -55,7 +64,8 @@ class block_manager {
 //(BLOCK_SIZE / sizeof(struct inode))
 
 // Block containing inode i
-#define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 3)
+//#define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 3) // Suspect wrong
+#define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 1)
 
 // Bitmap bits per block
 #define BPB           (BLOCK_SIZE*8)
@@ -85,6 +95,7 @@ class inode_manager {
 
  public:
   inode_manager();
+  ~inode_manager();
   uint32_t alloc_inode(uint32_t type);
   void free_inode(uint32_t inum);
   void read_file(uint32_t inum, char **buf, int *size);

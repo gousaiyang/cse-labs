@@ -476,4 +476,25 @@ void inode_manager::remove_file(uint32_t inum)
      * note: you need to consider about both the data block and inode of the file
      * do not forget to free memory if necessary.
      */
+
+    inode_t* ino = get_inode(inum);
+    if (!ino) {
+        printf("\tim: bad inode\n");
+        return;
+    }
+
+    blockid_t remove_blockids[MAXFILE];
+
+    int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
+    get_blockids(ino, remove_blockids, total_blocks);
+
+    for (int i = 0; i < total_blocks; ++i)
+        bm->free_block(remove_blockids[i]);
+
+    if (total_blocks > NDIRECT)
+        bm->free_block(ino->blocks[NDIRECT]);
+
+    free_inode(inum);
+
+    free(ino);
 }

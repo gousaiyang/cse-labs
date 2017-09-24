@@ -236,6 +236,8 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
     bzero(ino, sizeof(inode_t));
     ino->type = type;
     ino->size = 0;
+    ino->atime = (unsigned int)time(NULL);
+    ino->mtime = (unsigned int)time(NULL);
     ino->ctime = (unsigned int)time(NULL);
     bm->write_block(pos, buf);
 
@@ -465,7 +467,7 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
     set_blockids(ino, new_blockids, new_block_num);
     ino->size = size;
     ino->mtime = (unsigned int)time(NULL);
-    // ### Question: When should we set ctime?
+    ino->ctime = (unsigned int)time(NULL);
     put_inode(inum, ino);
 
     // Free memory allocated by get_inode().

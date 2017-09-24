@@ -10,12 +10,12 @@ disk::disk()
 void disk::read_block(blockid_t id, char *buf)
 {
     /*
-     *your lab1 code goes here.
-     *if id is smaller than 0 or larger than BLOCK_NUM
-     *or buf is null, just return.
-     *put the content of target block into buf.
-     *hint: use memcpy
-    */
+     * your lab1 code goes here.
+     * if id is smaller than 0 or larger than BLOCK_NUM
+     * or buf is null, just return.
+     * put the content of target block into buf.
+     * hint: use memcpy
+     */
 
     if (id < 0 || id >= BLOCK_NUM || !buf)
         return;
@@ -26,9 +26,9 @@ void disk::read_block(blockid_t id, char *buf)
 void disk::write_block(blockid_t id, const char *buf)
 {
     /*
-     *your lab1 code goes here.
-     *hint: just like read_block
-    */
+     * your lab1 code goes here.
+     * hint: just like read_block
+     */
 
     if (id < 0 || id >= BLOCK_NUM || !buf)
         return;
@@ -38,18 +38,18 @@ void disk::write_block(blockid_t id, const char *buf)
 
 // block layer -----------------------------------------
 
-int block_manager::least_available_in_block(const char *block_buf)
+int block_manager::least_available_in_block(const char *block_buf) // Return lowest '0' position in a block.
 {
-    for (int i = 0; i < BLOCK_SIZE; ++i) {
+    for (int i = 0; i < BLOCK_SIZE; ++i) { // Traverse every byte in the block.
         int revmap = ~block_buf[i];
-        if (revmap) {
+        if (revmap) { // Has available slot in this byte.
             for (int j = 0; j < 8; ++j)
                 if (revmap & (1 << j))
                     return 8 * i + j;
         }
     }
 
-    return -1;
+    return -1; // No available slot in this block.
 }
 
 int block_manager::find_available_slot()
@@ -69,8 +69,8 @@ int block_manager::find_available_slot()
 
 void block_manager::mark_as_allocated(uint32_t id)
 {
-    int pos = BBLOCK(id);
-    int subid = id % BPB;
+    int pos = BBLOCK(id); // Locate the block.
+    int subid = id % BPB; // Bit position inside the block.
     char buf[BLOCK_SIZE];
 
     read_block(pos, buf);
@@ -78,7 +78,7 @@ void block_manager::mark_as_allocated(uint32_t id)
     write_block(pos, buf);
 }
 
-void block_manager::mark_as_allocated_batch(uint32_t to_id)
+void block_manager::mark_as_allocated_batch(uint32_t to_id) // Mark blocks [0, to_id) as allocated.
 {
     int last_pos = BBLOCK(to_id);
     int whole_bytes = to_id % BPB / 8;
@@ -87,23 +87,25 @@ void block_manager::mark_as_allocated_batch(uint32_t to_id)
 
     memset(buf, 0xff, BLOCK_SIZE);
 
+    // Mark whole blocks.
     for (int i = 2; i < last_pos; ++i)
         write_block(i, buf);
     
     read_block(last_pos, buf);
 
+    // Mark whole bytes.
     memset(buf, 0xff, whole_bytes);
 
-    for (int i = 0; i < remain_bits; ++i)
-        buf[whole_bytes] |= 1 << (i % 8);
+    // Mark Remaining bits.
+    buf[whole_bytes] |= (1 << remain_bits) - 1;
 
     write_block(last_pos, buf);
 }
 
 void block_manager::mark_as_free(uint32_t id)
 {
-    int pos = BBLOCK(id);
-    int subid = id % BPB;
+    int pos = BBLOCK(id); // Locate the block.
+    int subid = id % BPB; // Bit position inside the block.
     char buf[BLOCK_SIZE];
 
     read_block(pos, buf);
@@ -119,9 +121,9 @@ blockid_t block_manager::alloc_block()
      * note: you should mark the corresponding bit in block bitmap when alloc.
      * you need to think about which block you can start to be allocated.
 
-     *hint: use macro IBLOCK and BBLOCK.
-            use bit operation.
-            remind yourself of the layout of disk.
+     * hint: use macro IBLOCK and BBLOCK.
+             use bit operation.
+             remind yourself of the layout of disk.
      */
 
     int newid = find_available_slot();
@@ -158,11 +160,13 @@ block_manager::block_manager()
     sb.nblocks = BLOCK_NUM;
     sb.ninodes = INODE_NUM;
 
+    // Write super block.
     char buf[BLOCK_SIZE];
     bzero(buf, BLOCK_SIZE);
     memcpy(buf, &sb, sizeof(superblock_t));
     write_block(1, buf);
 
+    // Mark boot block, super block, bitmap blocks and blocks for inode table as allocated.
     mark_as_allocated_batch(2 + BITMAP_BLOCKS + CEIL_DIV(INODE_NUM, IPB));
 }
 
@@ -215,6 +219,7 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
     char buf[BLOCK_SIZE];
     inode_t *ino;
 
+    // Find the least available inode number.
     do {
         ++newinum;
         pos = IBLOCK(newinum, bm->sb.nblocks);
@@ -227,9 +232,11 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
         exit(-1);
     }
 
+    // Initialize the inode.
     bzero(ino, sizeof(inode_t));
     ino->type = type;
     ino->size = 0;
+    ino->ctime = (unsigned int)time(NULL);
     bm->write_block(pos, buf);
 
     return newinum;
@@ -252,10 +259,9 @@ void inode_manager::free_inode(uint32_t inum)
 
     bm->read_block(pos, buf);
     inode_t *ino = (inode_t*)buf + (inum - 1) % IPB;
-    ino->type = 0;
+    ino->type = 0; // Set inode type to 0 to mark its number as free.
     bm->write_block(pos, buf);
 }
-
 
 /* Return an inode structure by inum, NULL otherwise.
  * Caller should release the memory. */
@@ -281,6 +287,12 @@ struct inode* inode_manager::get_inode(uint32_t inum)
     }
 
     ino = (struct inode*)malloc(sizeof(struct inode));
+
+    if (!ino) {
+        printf("Error: malloc failed\n");
+        exit(-1);
+    } 
+
     *ino = *ino_disk;
 
     return ino;
@@ -307,33 +319,33 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
     bm->write_block(IBLOCK(inum, bm->sb.nblocks), buf);
 }
 
-void inode_manager::get_blockids(const inode_t *ino, blockid_t *bids, int cnt)
+void inode_manager::get_blockids(const inode_t *ino, blockid_t *bids, int cnt) // Get first cnt block ids from an inode.
 {
     char buf[BLOCK_SIZE];
 
-    if (cnt <= NDIRECT) {
+    if (cnt <= NDIRECT) { // No indirect blocks.
         memcpy(bids, ino->blocks, cnt * sizeof(blockid_t));
-    } else {
+    } else { // Involves an indirect block. Get direct blocks and more blocks from the indirect block.
         memcpy(bids, ino->blocks, NDIRECT * sizeof(blockid_t));
         bm->read_block(ino->blocks[NDIRECT], buf);
         memcpy(bids + NDIRECT, buf, (cnt - NDIRECT) * sizeof(blockid_t));
     }
 }
 
-void inode_manager::set_blockids(inode_t *ino, const blockid_t *bids, int cnt)
+void inode_manager::set_blockids(inode_t *ino, const blockid_t *bids, int cnt) // Set cnt block ids to an inode.
 {
     char buf[BLOCK_SIZE];
 
-    if (cnt <= NDIRECT) {
+    if (cnt <= NDIRECT) { // No indirect blocks.
         memcpy(ino->blocks, bids, cnt * sizeof(blockid_t));
-    } else {
+    } else { // Need an indirect block. Set direct blocks and more blocks to the indirect block.
         memcpy(ino->blocks, bids, NDIRECT * sizeof(blockid_t));
         memcpy(buf, bids + NDIRECT, (cnt - NDIRECT) * sizeof(blockid_t));
         bm->write_block(ino->blocks[NDIRECT], buf);
     }
 }
 
-#define MIN(a,b) ((a)<(b) ? (a) : (b))
+#define MIN(a,b) ((a)<(b) ? (a) : (b)) // Seems unused.
 
 /* Get all the data of a file by inum.
  * Return allocated data, should be freed by caller. */
@@ -345,14 +357,22 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
      * and copy them to buf_out
      */
 
+    // Retrieve the corresponding inode.
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
         return;
     }
 
+    // Return inode size and set returned data pointer.
     *size = ino->size;
     *buf_out = (char*)malloc(ino->size);
+
+    if (!*buf_out) {
+        printf("Error: malloc failed\n");
+        exit(-1);
+    }
+
     char buf[BLOCK_SIZE];
     blockid_t read_blockids[MAXFILE];
 
@@ -360,8 +380,10 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
     int last_bytes = ino->size % BLOCK_SIZE;
 
+    // Get block ids of the inode.
     get_blockids(ino, read_blockids, total_blocks);
 
+    // Read data and transfer to returned data pointer.
     for (int i = 0; i < whole_blocks; ++i)
         bm->read_block(read_blockids[i], *buf_out + i * BLOCK_SIZE);
 
@@ -370,9 +392,11 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
         memcpy(*buf_out + whole_blocks * BLOCK_SIZE, buf, last_bytes);
     }
 
+    // Set atime of inode.
     ino->atime = (unsigned int)time(NULL);
     put_inode(inum, ino);
 
+    // Free memory allocated by get_inode().
     free(ino);
 }
 
@@ -387,62 +411,64 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
      * you should free some blocks if necessary.
      */
 
+    if (!buf)
+        return;
+
+    // Retrieve the corresponding inode.
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
         return;
     }
 
-    if (!buf)
-        return;
-
     blockid_t new_blockids[MAXFILE];
     char rest_buf[BLOCK_SIZE];
 
+    // Get original block ids.
     int old_block_num = CEIL_DIV(ino->size, BLOCK_SIZE);
     get_blockids(ino, new_blockids, old_block_num);
 
+    // Adjust block ids.
     int new_block_num = CEIL_DIV(size, BLOCK_SIZE);
     int diff_num;
 
-    if (new_block_num > old_block_num) {
+    if (new_block_num > old_block_num) { // Need to allocated more blocks.
         diff_num = new_block_num - old_block_num;
         for (int i = 0; i < diff_num; ++i)
             new_blockids[old_block_num + i] = bm->alloc_block();
 
-        if (old_block_num <= NDIRECT && new_block_num > NDIRECT)
-            ino->blocks[NDIRECT] = bm->alloc_block(); // alloc indirect
+        if (old_block_num <= NDIRECT && new_block_num > NDIRECT) // Need to allocate the indirect block.
+            ino->blocks[NDIRECT] = bm->alloc_block();
 
-    } else if (new_block_num < old_block_num) {
+    } else if (new_block_num < old_block_num) { // We can free some blocks.
         diff_num = old_block_num - new_block_num;
         for (int i = 0; i < diff_num; ++i)
             bm->free_block(new_blockids[old_block_num - 1 - i]);
 
-        if (old_block_num > NDIRECT && new_block_num <= NDIRECT)
-            bm->free_block(ino->blocks[NDIRECT]); // free indirect
+        if (old_block_num > NDIRECT && new_block_num <= NDIRECT) // We can free the indirect block.
+            bm->free_block(ino->blocks[NDIRECT]);
     }
 
-    // write data to data blocks
-
+    // Write data to data blocks.
     int whole_blocks = size / BLOCK_SIZE;
     int last_bytes = size % BLOCK_SIZE;
 
-    for (int i = 0; i < whole_blocks; ++i) {
+    for (int i = 0; i < whole_blocks; ++i)
         bm->write_block(new_blockids[i], buf + i * BLOCK_SIZE);
-    }
 
     if (last_bytes) {
         memcpy(rest_buf, buf + whole_blocks * BLOCK_SIZE, last_bytes);
         bm->write_block(new_blockids[whole_blocks], rest_buf);
     }
     
-    // write block info to ino
+    // Set new block ids, new size and mtime to inode.
     set_blockids(ino, new_blockids, new_block_num);
     ino->size = size;
     ino->mtime = (unsigned int)time(NULL);
-    // ### Question: When to set ctime?
+    // ### Question: When should we set ctime?
     put_inode(inum, ino);
 
+    // Free memory allocated by get_inode().
     free(ino);
 }
 
@@ -454,18 +480,21 @@ void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
      * you can refer to "struct attr" in extent_protocol.h
      */
     
+    // Retrieve the corresponding inode.
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
         return;
     }
 
+    // Read attr from inode and return to a.
     a.type = ino->type;
+    a.size = ino->size;
     a.atime = ino->atime;
     a.mtime = ino->mtime;
     a.ctime = ino->ctime;
-    a.size = ino->size;
 
+    // Free memory allocated by get_inode().
     free(ino);
 }
 
@@ -477,24 +506,30 @@ void inode_manager::remove_file(uint32_t inum)
      * do not forget to free memory if necessary.
      */
 
+    // Retrieve the corresponding inode.
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
         return;
     }
 
+    // Get block ids of the inode.
     blockid_t remove_blockids[MAXFILE];
 
     int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
     get_blockids(ino, remove_blockids, total_blocks);
 
+    // Free all the data blocks.
     for (int i = 0; i < total_blocks; ++i)
         bm->free_block(remove_blockids[i]);
 
+    // Free the indirect block if present.
     if (total_blocks > NDIRECT)
         bm->free_block(ino->blocks[NDIRECT]);
 
+    // Free the inode (mark inum as free).
     free_inode(inum);
 
+    // Free memory allocated by get_inode().
     free(ino);
 }

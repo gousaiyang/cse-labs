@@ -85,16 +85,14 @@ void block_manager::mark_as_allocated_batch(uint32_t to_id)
     int remain_bits = to_id % BPB % 8;
     char buf[BLOCK_SIZE];
 
-    for (int i = 0; i < BLOCK_SIZE; ++i)
-        buf[i] = 0xff;
+    memset(buf, 0xff, BLOCK_SIZE);
 
     for (int i = 2; i < last_pos; ++i)
         write_block(i, buf);
     
     read_block(last_pos, buf);
 
-    for (int i = 0; i < whole_bytes; ++i)
-        buf[i] = 0xff;
+    memset(buf, 0xff, whole_bytes);
 
     for (int i = 0; i < remain_bits; ++i)
         buf[whole_bytes] |= 1 << (i % 8);
@@ -160,7 +158,12 @@ block_manager::block_manager()
     sb.nblocks = BLOCK_NUM;
     sb.ninodes = INODE_NUM;
 
-    mark_as_allocated_batch(2 + BITMAP_BLOCKS + INODE_NUM / IPB);
+    char buf[BLOCK_SIZE];
+    bzero(buf, BLOCK_SIZE);
+    memcpy(buf, &sb, sizeof(superblock_t));
+    write_block(1, buf);
+
+    mark_as_allocated_batch(2 + BITMAP_BLOCKS + CEIL_DIV(INODE_NUM, IPB));
 }
 
 block_manager::~block_manager()
@@ -226,6 +229,7 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
 
     bzero(ino, sizeof(inode_t));
     ino->type = type;
+    ino->size = 0;
     bm->write_block(pos, buf);
 
     return newinum;
@@ -303,6 +307,32 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
     bm->write_block(IBLOCK(inum, bm->sb.nblocks), buf);
 }
 
+void inode_manager::get_blockids(const inode_t *ino, blockid_t *bids, int cnt)
+{
+    char buf[BLOCK_SIZE];
+
+    if (cnt <= NDIRECT) {
+        memcpy(bids, ino->blocks, cnt * sizeof(blockid_t));
+    } else {
+        memcpy(bids, ino->blocks, NDIRECT * sizeof(blockid_t));
+        bm->read_block(ino->blocks[NDIRECT], buf);
+        memcpy(bids + NDIRECT, buf, (cnt - NDIRECT) * sizeof(blockid_t));
+    }
+}
+
+void inode_manager::set_blockids(inode_t *ino, const blockid_t *bids, int cnt)
+{
+    char buf[BLOCK_SIZE];
+
+    if (cnt <= NDIRECT) {
+        memcpy(ino->blocks, bids, cnt * sizeof(blockid_t));
+    } else {
+        memcpy(ino->blocks, bids, NDIRECT * sizeof(blockid_t));
+        memcpy(buf, bids + NDIRECT, (cnt - NDIRECT) * sizeof(blockid_t));
+        bm->write_block(ino->blocks[NDIRECT], buf);
+    }
+}
+
 #define MIN(a,b) ((a)<(b) ? (a) : (b))
 
 /* Get all the data of a file by inum.
@@ -321,43 +351,29 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
         return;
     }
 
-    int read_size = MIN(*(uint*)size, ino->size);
-    *size = read_size;
-    *buf_out = (char*)malloc(read_size);
-    char *p = *buf_out;
-    char buf[BLOCK_SIZE], ind_buf[BLOCK_SIZE];
+    *size = ino->size;
+    *buf_out = (char*)malloc(ino->size);
+    char buf[BLOCK_SIZE];
+    blockid_t read_blockids[MAXFILE];
 
-    int whole_blocks = read_size / BLOCK_SIZE;
+    int whole_blocks = ino->size / BLOCK_SIZE;
+    int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
+    int last_bytes = ino->size % BLOCK_SIZE;
 
-    if (whole_blocks < NDIRECT) {
-        for (int i = 0; i < whole_blocks; ++i) {
-            bm->read_block(ino->blocks[i], buf);
-            memcpy(p, buf, BLOCK_SIZE);
-            p += BLOCK_SIZE;
-        }
+    get_blockids(ino, read_blockids, total_blocks);
 
-        bm->read_block(ino->blocks[whole_blocks], buf);
-        memcpy(p, buf, read_size % BLOCK_SIZE);
-    } else {
-        for (int i = 0; i < NDIRECT; ++i) {
-            bm->read_block(ino->blocks[i], buf);
-            memcpy(p, buf, BLOCK_SIZE);
-            p += BLOCK_SIZE;
-        }
+    for (int i = 0; i < whole_blocks; ++i)
+        bm->read_block(read_blockids[i], *buf_out + i * BLOCK_SIZE);
 
-        bm->read_block(ino->blocks[NDIRECT], ind_buf);
-
-        for (int i = 0; i < whole_blocks - NDIRECT; ++i) {
-            bm->read_block(*((uint*)ind_buf + i), buf);
-            memcpy(p, buf, BLOCK_SIZE);
-            p += BLOCK_SIZE;
-        }
-
-        bm->read_block(*((uint*)ind_buf + whole_blocks - NDIRECT), buf);
-        memcpy(p, buf, read_size % BLOCK_SIZE);
+    if (last_bytes) {
+        bm->read_block(read_blockids[whole_blocks], buf);
+        memcpy(*buf_out + whole_blocks * BLOCK_SIZE, buf, last_bytes);
     }
 
-    // ### Need to set atime?
+    ino->atime = (unsigned int)time(NULL);
+    put_inode(inum, ino);
+
+    free(ino);
 }
 
 /* alloc/free blocks if needed */
@@ -370,6 +386,64 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
      * is larger or smaller than the size of original inode.
      * you should free some blocks if necessary.
      */
+
+    inode_t* ino = get_inode(inum);
+    if (!ino) {
+        printf("\tim: bad inode\n");
+        return;
+    }
+
+    if (!buf)
+        return;
+
+    blockid_t new_blockids[MAXFILE];
+    char rest_buf[BLOCK_SIZE];
+
+    int old_block_num = CEIL_DIV(ino->size, BLOCK_SIZE);
+    get_blockids(ino, new_blockids, old_block_num);
+
+    int new_block_num = CEIL_DIV(size, BLOCK_SIZE);
+    int diff_num;
+
+    if (new_block_num > old_block_num) {
+        diff_num = new_block_num - old_block_num;
+        for (int i = 0; i < diff_num; ++i)
+            new_blockids[old_block_num + i] = bm->alloc_block();
+
+        if (old_block_num <= NDIRECT && new_block_num > NDIRECT)
+            ino->blocks[NDIRECT] = bm->alloc_block(); // alloc indirect
+
+    } else if (new_block_num < old_block_num) {
+        diff_num = old_block_num - new_block_num;
+        for (int i = 0; i < diff_num; ++i)
+            bm->free_block(new_blockids[old_block_num - 1 - i]);
+
+        if (old_block_num > NDIRECT && new_block_num <= NDIRECT)
+            bm->free_block(ino->blocks[NDIRECT]); // free indirect
+    }
+
+    // write data to data blocks
+
+    int whole_blocks = size / BLOCK_SIZE;
+    int last_bytes = size % BLOCK_SIZE;
+
+    for (int i = 0; i < whole_blocks; ++i) {
+        bm->write_block(new_blockids[i], buf + i * BLOCK_SIZE);
+    }
+
+    if (last_bytes) {
+        memcpy(rest_buf, buf + whole_blocks * BLOCK_SIZE, last_bytes);
+        bm->write_block(new_blockids[whole_blocks], rest_buf);
+    }
+    
+    // write block info to ino
+    set_blockids(ino, new_blockids, new_block_num);
+    ino->size = size;
+    ino->mtime = (unsigned int)time(NULL);
+    // ### Question: When to set ctime?
+    put_inode(inum, ino);
+
+    free(ino);
 }
 
 void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)

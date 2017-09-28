@@ -22,8 +22,12 @@ yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
         printf("error init root dir\n"); // XYB: init root dir
 }
 
-yfs_client::inum
-yfs_client::n2i(std::string n)
+yfs_client::~yfs_client()
+{
+    delete ec;
+}
+
+yfs_client::inum yfs_client::n2i(std::string n)
 {
     std::istringstream ist(n);
     unsigned long long finum;
@@ -31,16 +35,14 @@ yfs_client::n2i(std::string n)
     return finum;
 }
 
-std::string
-yfs_client::filename(inum inum)
+std::string yfs_client::filename(inum inum)
 {
     std::ostringstream ost;
     ost << inum;
     return ost.str();
 }
 
-bool
-yfs_client::isfile(inum inum)
+bool yfs_client::isfile(inum inum)
 {
     extent_protocol::attr a;
 
@@ -52,25 +54,23 @@ yfs_client::isfile(inum inum)
     if (a.type == extent_protocol::T_FILE) {
         printf("isfile: %lld is a file\n", inum);
         return true;
-    } 
+    }
     printf("isfile: %lld is a dir\n", inum);
     return false;
 }
 /** Your code here for Lab...
  * You may need to add routines such as
  * readlink, issymlink here to implement symbolic link.
- * 
+ *
  * */
 
-bool
-yfs_client::isdir(inum inum)
+bool yfs_client::isdir(inum inum)
 {
     // Oops! is this still correct when you implement symlink?
     return ! isfile(inum);
 }
 
-int
-yfs_client::getfile(inum inum, fileinfo &fin)
+int yfs_client::getfile(inum inum, fileinfo &fin)
 {
     int r = OK;
 
@@ -91,8 +91,7 @@ release:
     return r;
 }
 
-int
-yfs_client::getdir(inum inum, dirinfo &din)
+int yfs_client::getdir(inum inum, dirinfo &din)
 {
     int r = OK;
 
@@ -120,8 +119,7 @@ release:
 } while (0)
 
 // Only support set size of attr
-int
-yfs_client::setattr(inum ino, size_t size)
+int yfs_client::setattr(inum ino, size_t size)
 {
     int r = OK;
 
@@ -134,22 +132,20 @@ yfs_client::setattr(inum ino, size_t size)
     return r;
 }
 
-int
-yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
+int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
     /*
      * your lab2 code goes here.
      * note: lookup is what you need to check if file exist;
-     * after create file or dir, you must remember to modify the parent infomation.
+     * after create file or dir, you must remember to modify the parent information.
      */
 
     return r;
 }
 
-int
-yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
+int yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
@@ -162,8 +158,7 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
     return r;
 }
 
-int
-yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
+int yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
 {
     int r = OK;
 
@@ -176,8 +171,7 @@ yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
     return r;
 }
 
-int
-yfs_client::readdir(inum dir, std::list<dirent> &list)
+int yfs_client::readdir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
 
@@ -190,8 +184,7 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
     return r;
 }
 
-int
-yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
+int yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
 {
     int r = OK;
 
@@ -203,9 +196,7 @@ yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
     return r;
 }
 
-int
-yfs_client::write(inum ino, size_t size, off_t off, const char *data,
-        size_t &bytes_written)
+int yfs_client::write(inum ino, size_t size, off_t off, const char *data, size_t &bytes_written)
 {
     int r = OK;
 
@@ -218,7 +209,7 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
     return r;
 }
 
-int yfs_client::unlink(inum parent,const char *name)
+int yfs_client::unlink(inum parent, const char *name)
 {
     int r = OK;
 
@@ -230,4 +221,3 @@ int yfs_client::unlink(inum parent,const char *name)
 
     return r;
 }
-

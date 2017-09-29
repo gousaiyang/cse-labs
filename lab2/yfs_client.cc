@@ -67,6 +67,8 @@ bool yfs_client::inum_valid(inum inum)
     return inum >= 1 && inum <= INODE_NUM;
 }
 
+// Dir entry layout: |<file name length>|<file name>|<inum>|
+
 int yfs_client::writedir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
@@ -83,6 +85,51 @@ int yfs_client::writedir(inum dir, std::list<dirent> &list)
     }
 
     EXT_RPC(ec->put(dir, ost.str()));
+
+release:
+    return r;
+}
+
+int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino_out, uint32_t type)
+{
+    int r = OK;
+
+    /*
+     * your lab2 code goes here.
+     * note: lookup is what you need to check if file or dir exist;
+     * after create file or dir, you must remember to modify the parent information.
+     * Ignore mode.
+     */
+
+    if (!inum_valid(parent))
+        return IOERR;
+
+    if (!name)
+        return IOERR;
+
+    std::string fname = std::string(name);
+
+    if (!filename_valid(fname))
+        return IOERR;
+
+    std::list<dirent> itemlist;
+
+    r = readdir(parent, itemlist);
+    if (r != OK)
+        return r;
+
+    for (std::list<dirent>::iterator it = itemlist.begin(); it != itemlist.end(); ++it)
+        if (it->name == fname)
+            return EXIST;
+    
+    dirent de;
+    de.name = fname;
+
+    EXT_RPC(ec->create(type, ino_out));
+    de.inum = ino_out;
+    
+    itemlist.push_back(de);
+    r = writedir(parent, itemlist);
 
 release:
     return r;
@@ -189,64 +236,14 @@ release:
     return r;
 }
 
-// Dir entry layout: |<file name length>|<file name>|<inum>|
-
 int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
-    int r = OK;
-
-    /*
-     * your lab2 code goes here.
-     * note: lookup is what you need to check if file exist;
-     * after create file or dir, you must remember to modify the parent information.
-     * You don't need to implement file mode.
-     */
-
-    if (!inum_valid(parent))
-        return IOERR;
-
-    if (!name)
-        return IOERR;
-
-    std::string fname = std::string(name);
-
-    if (!filename_valid(fname))
-        return IOERR;
-
-    std::list<dirent> itemlist;
-
-    r = readdir(parent, itemlist);
-    if (r != OK)
-        return r;
-
-    for (std::list<dirent>::iterator it = itemlist.begin(); it != itemlist.end(); ++it)
-        if (it->name == fname)
-            return EXIST;
-    
-    dirent de;
-    de.name = fname;
-
-    EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
-    de.inum = ino_out;
-    
-    itemlist.push_back(de);
-    r = writedir(parent, itemlist);
-
-release:
-    return r;
+    return createitem(parent, name, mode, ino_out, extent_protocol::T_FILE);
 }
 
 int yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
-    int r = OK;
-
-    /*
-     * your lab2 code goes here.
-     * note: lookup is what you need to check if directory exist;
-     * after create file or dir, you must remember to modify the parent information.
-     */
-
-    return r;
+    return createitem(parent, name, mode, ino_out, extent_protocol::T_DIR);
 }
 
 int yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
@@ -407,5 +404,43 @@ int yfs_client::unlink(inum parent, const char *name)
      * and update the parent directory content.
      */
 
+    if (!inum_valid(parent))
+        return IOERR;
+
+    if (!name)
+        return NOENT;
+
+    std::string fname = std::string(name);
+
+    if (!filename_valid(fname))
+        return NOENT;
+    
+    std::list<dirent> itemlist;
+
+    r = readdir(parent, itemlist);
+    if (r != OK)
+        return r;
+
+    std::list<dirent>::iterator it;
+
+    for (it = itemlist.begin(); it != itemlist.end(); ++it)
+        if (it->name == fname) 
+            break;
+
+    if (it == itemlist.end())
+        return NOENT;
+
+    extent_protocol::attr a;
+    EXT_RPC(ec->getattr(it->inum, a));
+    
+    if (a.type == extent_protocol::T_DIR)
+        return IOERR;
+
+    EXT_RPC(ec->remove(it->inum));
+    itemlist.erase(it);
+    
+    r = writedir(parent, itemlist);
+
+release:
     return r;
 }

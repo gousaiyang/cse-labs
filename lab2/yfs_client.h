@@ -38,6 +38,7 @@ private:
     static bool filename_valid(std::string);
     static bool inum_valid(inum);
     int writedir(inum, std::list<dirent> &);
+    int createitem(inum, const char *, mode_t, inum &, uint32_t);
 
 public:
     yfs_client();
@@ -57,7 +58,7 @@ public:
     int write(inum, size_t, off_t, const char *, size_t &);
     int read(inum, size_t, off_t, std::string &);
     int unlink(inum, const char *);
-    int mkdir(inum , const char *, mode_t , inum &);
+    int mkdir(inum, const char *, mode_t, inum &);
 
     /** you may need to add symbolic link related methods here.*/
 };

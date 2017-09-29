@@ -6,10 +6,11 @@
 #include "extent_client.h"
 #include <vector>
 
+#define MAX_FILENAME 255
 
 class yfs_client {
     extent_client *ec;
-    
+
 public:
     typedef unsigned long long inum;
     enum xxstatus { OK, RPCERR, NOENT, IOERR, EXIST };
@@ -32,8 +33,11 @@ public:
     };
 
 private:
-    static std::string filename(inum);
-    static inum n2i(std::string);
+    /*static inum s2n(std::string);
+    static std::string n2s(inum);*/
+    static bool filename_valid(std::string);
+    static bool inum_valid(inum);
+    int writedir(inum, std::list<dirent> &);
 
 public:
     yfs_client();

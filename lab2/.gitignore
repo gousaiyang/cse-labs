@@ -1,5 +1,6 @@
 *.o
 *.d
 *.tgz
+*.log
 lab1_tester
 yfs_client

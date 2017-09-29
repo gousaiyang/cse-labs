@@ -4,10 +4,19 @@
 #include <sstream>
 #include <iostream>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#define EXT_RPC(xx) do { \
+    if ((xx) != extent_protocol::OK) { \
+        printf("EXT_RPC Error: %s:%d \n", __FILE__, __LINE__); \
+        r = IOERR; \
+        goto release; \
+    } \
+} while (0)
 
 yfs_client::yfs_client()
 {
@@ -27,7 +36,7 @@ yfs_client::~yfs_client()
     delete ec;
 }
 
-yfs_client::inum yfs_client::n2i(std::string n)
+/*yfs_client::inum yfs_client::s2n(std::string n)
 {
     std::istringstream ist(n);
     unsigned long long finum;
@@ -35,16 +44,51 @@ yfs_client::inum yfs_client::n2i(std::string n)
     return finum;
 }
 
-std::string yfs_client::filename(inum inum)
+std::string yfs_client::n2s(inum inum)
 {
     std::ostringstream ost;
     ost << inum;
     return ost.str();
+}*/
+
+bool yfs_client::filename_valid(std::string name)
+{
+    return !name.empty() && name.length() <= MAX_FILENAME
+        && name.find('/') == std::string::npos && name.find('\0') == std::string::npos;
+}
+
+bool yfs_client::inum_valid(inum inum)
+{
+    return inum >= 1 && inum <= INODE_NUM;
+}
+
+int yfs_client::writedir(inum dir, std::list<dirent> &list)
+{
+    int r = OK;
+
+    if (!inum_valid(dir))
+        return IOERR;
+
+    std::ostringstream ost;
+
+    for (std::list<dirent>::iterator it = list.begin(); it != list.end(); ++it) {
+        ost.put((unsigned char)it->name.length());
+        ost.write(it->name.c_str(), it->name.length());
+        ost.write((char*)&it->inum, sizeof(inum));
+    }
+
+    EXT_RPC(ec->put(dir, ost.str()));
+
+release:
+    return r;
 }
 
 bool yfs_client::isfile(inum inum)
 {
     extent_protocol::attr a;
+
+    if (!inum_valid(inum))
+        return false;
 
     if (ec->getattr(inum, a) != extent_protocol::OK) {
         printf("error getting attr\n");
@@ -55,7 +99,7 @@ bool yfs_client::isfile(inum inum)
         printf("isfile: %lld is a file\n", inum);
         return true;
     }
-    printf("isfile: %lld is a dir\n", inum);
+    printf("isfile: %lld is a dir\n", inum); // Other types?
     return false;
 }
 /** Your code here for Lab...
@@ -66,7 +110,10 @@ bool yfs_client::isfile(inum inum)
 
 bool yfs_client::isdir(inum inum)
 {
-    // Oops! is this still correct when you implement symlink?
+    if (!inum_valid(inum))
+        return false;
+
+    // Oops! This will be wrong when you implement symlink!
     return ! isfile(inum);
 }
 
@@ -74,12 +121,12 @@ int yfs_client::getfile(inum inum, fileinfo &fin)
 {
     int r = OK;
 
+    if (!inum_valid(inum))
+        return IOERR;
+
     printf("getfile %016llx\n", inum);
     extent_protocol::attr a;
-    if (ec->getattr(inum, a) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->getattr(inum, a));
 
     fin.atime = a.atime;
     fin.mtime = a.mtime;
@@ -95,12 +142,13 @@ int yfs_client::getdir(inum inum, dirinfo &din)
 {
     int r = OK;
 
+    if (!inum_valid(inum))
+        return IOERR;
+
     printf("getdir %016llx\n", inum);
     extent_protocol::attr a;
-    if (ec->getattr(inum, a) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->getattr(inum, a));
+
     din.atime = a.atime;
     din.mtime = a.mtime;
     din.ctime = a.ctime;
@@ -108,15 +156,6 @@ int yfs_client::getdir(inum inum, dirinfo &din)
 release:
     return r;
 }
-
-
-#define EXT_RPC(xx) do { \
-    if ((xx) != extent_protocol::OK) { \
-        printf("EXT_RPC Error: %s:%d \n", __FILE__, __LINE__); \
-        r = IOERR; \
-        goto release; \
-    } \
-} while (0)
 
 // Only support set size of attr
 int yfs_client::setattr(inum ino, size_t size)
@@ -132,6 +171,8 @@ int yfs_client::setattr(inum ino, size_t size)
     return r;
 }
 
+// Dir entry layout: |<file name length>|<file name>|<inum>|
+
 int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
@@ -140,8 +181,37 @@ int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out
      * your lab2 code goes here.
      * note: lookup is what you need to check if file exist;
      * after create file or dir, you must remember to modify the parent information.
+     * You don't need to implement file mode.
      */
 
+    if (!inum_valid(parent))
+        return IOERR;
+
+    std::string fname = std::string(name);
+
+    if (!filename_valid(fname))
+        return IOERR;
+
+    std::list<dirent> itemlist;
+
+    r = readdir(parent, itemlist);
+    if (r != OK)
+        return r;
+
+    for (std::list<dirent>::iterator it = itemlist.begin(); it != itemlist.end(); ++it)
+        if (it->name == fname)
+            return EXIST;
+    
+    dirent de;
+    de.name = fname;
+
+    EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
+    de.inum = ino_out;
+    
+    itemlist.push_back(de);
+    r = writedir(parent, itemlist);
+
+release:
     return r;
 }
 
@@ -152,7 +222,7 @@ int yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
     /*
      * your lab2 code goes here.
      * note: lookup is what you need to check if directory exist;
-     * after create file or dir, you must remember to modify the parent infomation.
+     * after create file or dir, you must remember to modify the parent information.
      */
 
     return r;
@@ -168,6 +238,29 @@ int yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out
      * you should design the format of directory content.
      */
 
+    if (!inum_valid(parent))
+        return IOERR;
+
+    std::string fname = std::string(name);
+    found = false;
+
+    if (!filename_valid(fname))
+        return r;
+
+    std::list<dirent> itemlist;
+
+    r = readdir(parent, itemlist);
+    if (r != OK)
+        return r;
+
+    for (std::list<dirent>::iterator it = itemlist.begin(); it != itemlist.end(); ++it) {
+        if (it->name == fname) {
+            found = true;
+            ino_out = it->inum;
+            break;
+        }
+    }
+
     return r;
 }
 
@@ -177,10 +270,39 @@ int yfs_client::readdir(inum dir, std::list<dirent> &list)
 
     /*
      * your lab2 code goes here.
-     * note: you should parse the dirctory content using your defined format,
+     * note: you should parse the directory content using your defined format,
      * and push the dirents to the list.
      */
 
+    list.clear();
+
+    if (!inum_valid(dir))
+        return IOERR;
+
+    std::istringstream ist;
+    std::string content;
+    char c;
+    char buf[MAX_FILENAME + 1];
+    dirent de;
+
+    bzero(buf, MAX_FILENAME + 1); // Clear it because istringstream::read will not append '\0'!
+    EXT_RPC(ec->get(dir, content));
+
+    ist.str(content);
+
+    while (ist.get(c)) {
+        if (!ist.read(buf, (int)(unsigned char)c)) // Note: istringstream::get(buf, size) will stop at '\n'!
+            break;
+
+        de.name = std::string(buf);
+
+        if (!ist.read((char*)&de.inum, sizeof(inum)))
+            break;
+
+        list.push_back(de);
+    }
+
+release:
     return r;
 }
 

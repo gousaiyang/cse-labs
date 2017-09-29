@@ -363,6 +363,7 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
+        *size = 0;
         return;
     }
 
@@ -486,6 +487,7 @@ void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
     inode_t* ino = get_inode(inum);
     if (!ino) {
         printf("\tim: bad inode\n");
+        a.type = 0;
         return;
     }
 

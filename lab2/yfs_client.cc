@@ -4,11 +4,16 @@
 #include <sstream>
 #include <iostream>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+static inline size_t maxsize2(size_t s1, size_t s2) {
+    return s1 > s2 ? s1 : s2;
+}
 
 #define EXT_RPC(xx) do { \
     if ((xx) != extent_protocol::OK) { \
@@ -168,6 +173,19 @@ int yfs_client::setattr(inum ino, size_t size)
      * according to the size (<, =, or >) content length.
      */
 
+    if (!inum_valid(ino))
+        return IOERR;
+
+    size_t csize;
+    std::string content;
+
+    EXT_RPC(ec->get(ino, content));
+
+    csize = content.length();
+
+    EXT_RPC(ec->put(ino, size > csize ? (content + std::string(size - csize, '\0')) : content.substr(0, size)));
+
+release:
     return r;
 }
 
@@ -185,6 +203,9 @@ int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out
      */
 
     if (!inum_valid(parent))
+        return IOERR;
+
+    if (!name)
         return IOERR;
 
     std::string fname = std::string(name);
@@ -238,11 +259,15 @@ int yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out
      * you should design the format of directory content.
      */
 
+    found = false;
+
     if (!inum_valid(parent))
         return IOERR;
 
+    if (!name)
+        return r;
+
     std::string fname = std::string(name);
-    found = false;
 
     if (!filename_valid(fname))
         return r;
@@ -315,6 +340,16 @@ int yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
      * note: read using ec->get().
      */
 
+    if (!inum_valid(ino)) {
+        data.clear();
+        return IOERR;
+    }
+
+    std::string content;
+    EXT_RPC(ec->get(ino, content));
+    data = content.substr(off, size);
+
+release:
     return r;
 }
 
@@ -328,6 +363,37 @@ int yfs_client::write(inum ino, size_t size, off_t off, const char *data, size_t
      * when off > length of original file, fill the holes with '\0'.
      */
 
+    bytes_written = 0;
+
+    if (!inum_valid(ino))
+        return IOERR;
+
+    if (!data)
+        return r;
+
+    size_t newsize;
+    std::string content, newcontent;
+    char *buf;
+
+    EXT_RPC(ec->get(ino, content));
+
+    newsize = maxsize2(content.length(), off + size);
+
+    buf = (char*)calloc(newsize, 1);
+    if (!buf) {
+        printf("Error: calloc failed.\n");
+        exit(-1);
+    }
+
+    memcpy(buf, content.c_str(), content.length());
+    memcpy(buf + off, data, size);
+    newcontent = std::string(buf, newsize); // We have to specify size, or the construction may stop at '\0'.
+    free(buf);
+
+    EXT_RPC(ec->put(ino, newcontent));
+    bytes_written = size;
+
+release:
     return r;
 }
 

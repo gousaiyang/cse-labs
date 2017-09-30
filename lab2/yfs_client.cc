@@ -306,17 +306,19 @@ int yfs_client::readdir(inum dir, std::list<dirent> &list)
     char c;
     char buf[MAX_FILENAME + 1];
     dirent de;
-
-    bzero(buf, MAX_FILENAME + 1); // Clear it because istringstream::read will not append '\0'!
+    int namelen;
+    
     EXT_RPC(ec->get(dir, content));
 
     ist.str(content);
 
     while (ist.get(c)) {
-        if (!ist.read(buf, (int)(unsigned char)c)) // Note: istringstream::get(buf, size) will stop at '\n'!
+        namelen = (int)(unsigned char)c;
+
+        if (!ist.read(buf, namelen)) // Note: istringstream::get(buf, namelen) will stop at '\n'!
             break;
 
-        de.name = std::string(buf);
+        de.name = std::string(buf, namelen); // Specify size because istringstream::read will not append '\0'!
 
         if (!ist.read((char*)&de.inum, sizeof(inum)))
             break;

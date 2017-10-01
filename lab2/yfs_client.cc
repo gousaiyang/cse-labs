@@ -211,6 +211,30 @@ release:
     return r;
 }
 
+int yfs_client::getsymlink(inum inum, fileinfo &fin)
+{
+    int r = OK;
+
+    if (!inum_valid(inum))
+        return IOERR;
+
+    printf("getsymlink %016llx\n", inum);
+    extent_protocol::attr a;
+    EXT_RPC(ec->getattr(inum, a));
+
+    if (a.type != extent_protocol::T_SYMLINK)
+        return IOERR;
+
+    fin.atime = a.atime;
+    fin.mtime = a.mtime;
+    fin.ctime = a.ctime;
+    fin.size = a.size;
+    printf("getsymlink %016llx -> sz %llu\n", inum, fin.size);
+
+release:
+    return r;
+}
+
 // Only support set size of attr
 int yfs_client::setattr(inum ino, size_t size)
 {
@@ -441,6 +465,37 @@ int yfs_client::unlink(inum parent, const char *name)
     itemlist.erase(it);
     
     r = writedir(parent, itemlist);
+
+release:
+    return r;
+}
+
+int yfs_client::symlink(inum parent, const char *name, const char *target, inum &ino_out)
+{
+    if (!target || !strlen(target))
+        return IOERR;
+
+    int r = createitem(parent, name, 0, ino_out, extent_protocol::T_SYMLINK);
+
+    if (r != OK)
+        return r;
+
+    EXT_RPC(ec->put(ino_out, std::string(target)));
+
+release:
+    return r;
+}
+
+int yfs_client::readlink(inum ino, std::string &target)
+{
+    int r = OK;
+
+    if (!issymlink(ino)) {
+        target.clear();
+        return IOERR;
+    }
+
+    EXT_RPC(ec->get(ino, target));
 
 release:
     return r;

@@ -50,6 +50,7 @@ public:
 
     int getfile(inum, fileinfo &);
     int getdir(inum, dirinfo &);
+    int getsymlink(inum, fileinfo &);
 
     int setattr(inum, size_t);
     int lookup(inum, const char *, bool &, inum &);
@@ -59,6 +60,8 @@ public:
     int read(inum, size_t, off_t, std::string &);
     int unlink(inum, const char *);
     int mkdir(inum, const char *, mode_t, inum &);
+    int symlink(inum, const char *, const char *, inum &);
+    int readlink(inum, std::string &);
 
     /** you may need to add symbolic link related methods here.*/
 };

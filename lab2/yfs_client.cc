@@ -41,21 +41,6 @@ yfs_client::~yfs_client()
     delete ec;
 }
 
-/*yfs_client::inum yfs_client::s2n(std::string n)
-{
-    std::istringstream ist(n);
-    unsigned long long finum;
-    ist >> finum;
-    return finum;
-}
-
-std::string yfs_client::n2s(inum inum)
-{
-    std::ostringstream ost;
-    ost << inum;
-    return ost.str();
-}*/
-
 bool yfs_client::filename_valid(std::string name)
 {
     return !name.empty() && name.length() <= MAX_FILENAME
@@ -73,7 +58,7 @@ int yfs_client::writedir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
 
-    if (!inum_valid(dir))
+    if (!isdir(dir))
         return IOERR;
 
     std::ostringstream ost;
@@ -101,7 +86,7 @@ int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino
      * Ignore mode.
      */
 
-    if (!inum_valid(parent))
+    if (!isdir(parent))
         return IOERR;
 
     if (!name)
@@ -135,7 +120,7 @@ release:
     return r;
 }
 
-bool yfs_client::isfile(inum inum)
+bool yfs_client::istype(inum inum, uint32_t type)
 {
     extent_protocol::attr a;
 
@@ -147,26 +132,37 @@ bool yfs_client::isfile(inum inum)
         return false;
     }
 
-    if (a.type == extent_protocol::T_FILE) {
-        printf("isfile: %lld is a file\n", inum);
+    return a.type == type;
+}
+
+bool yfs_client::isfile(inum inum)
+{
+    if (istype(inum, extent_protocol::T_FILE)) {
+        printf("isfile: %llu is a file\n", inum);
         return true;
     }
-    printf("isfile: %lld is a dir\n", inum); // Other types?
+
     return false;
 }
-/** Your code here for Lab...
- * You may need to add routines such as
- * readlink, issymlink here to implement symbolic link.
- *
- * */
 
 bool yfs_client::isdir(inum inum)
 {
-    if (!inum_valid(inum))
-        return false;
+    if (istype(inum, extent_protocol::T_DIR)) {
+        printf("isdir: %llu is a dir\n", inum);
+        return true;
+    }
 
-    // Oops! This will be wrong when you implement symlink!
-    return ! isfile(inum);
+    return false;
+}
+
+bool yfs_client::issymlink(inum inum)
+{
+    if (istype(inum, extent_protocol::T_SYMLINK)) {
+        printf("issymlink: %llu is a symlink\n", inum);
+        return true;
+    }
+
+    return false;
 }
 
 int yfs_client::getfile(inum inum, fileinfo &fin)
@@ -179,6 +175,9 @@ int yfs_client::getfile(inum inum, fileinfo &fin)
     printf("getfile %016llx\n", inum);
     extent_protocol::attr a;
     EXT_RPC(ec->getattr(inum, a));
+
+    if (a.type != extent_protocol::T_FILE)
+        return IOERR;
 
     fin.atime = a.atime;
     fin.mtime = a.mtime;
@@ -200,6 +199,9 @@ int yfs_client::getdir(inum inum, dirinfo &din)
     printf("getdir %016llx\n", inum);
     extent_protocol::attr a;
     EXT_RPC(ec->getattr(inum, a));
+
+    if (a.type != extent_protocol::T_DIR)
+        return IOERR;
 
     din.atime = a.atime;
     din.mtime = a.mtime;
@@ -258,7 +260,7 @@ int yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out
 
     found = false;
 
-    if (!inum_valid(parent))
+    if (!isdir(parent))
         return IOERR;
 
     if (!name)
@@ -298,7 +300,7 @@ int yfs_client::readdir(inum dir, std::list<dirent> &list)
 
     list.clear();
 
-    if (!inum_valid(dir))
+    if (!isdir(dir))
         return IOERR;
 
     std::istringstream ist;
@@ -339,7 +341,7 @@ int yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
      * note: read using ec->get().
      */
 
-    if (!inum_valid(ino)) {
+    if (!isfile(ino)) {
         data.clear();
         return IOERR;
     }
@@ -364,7 +366,7 @@ int yfs_client::write(inum ino, size_t size, off_t off, const char *data, size_t
 
     bytes_written = 0;
 
-    if (!inum_valid(ino))
+    if (!isfile(ino))
         return IOERR;
 
     if (!data)
@@ -406,7 +408,7 @@ int yfs_client::unlink(inum parent, const char *name)
      * and update the parent directory content.
      */
 
-    if (!inum_valid(parent))
+    if (!isdir(parent))
         return IOERR;
 
     if (!name)
@@ -432,10 +434,7 @@ int yfs_client::unlink(inum parent, const char *name)
     if (it == itemlist.end())
         return NOENT;
 
-    extent_protocol::attr a;
-    EXT_RPC(ec->getattr(it->inum, a));
-    
-    if (a.type == extent_protocol::T_DIR)
+    if (!isfile(it->inum) && !issymlink(it->inum))
         return IOERR;
 
     EXT_RPC(ec->remove(it->inum));

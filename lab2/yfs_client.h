@@ -33,12 +33,11 @@ public:
     };
 
 private:
-    /*static inum s2n(std::string);
-    static std::string n2s(inum);*/
     static bool filename_valid(std::string);
     static bool inum_valid(inum);
     int writedir(inum, std::list<dirent> &);
     int createitem(inum, const char *, mode_t, inum &, uint32_t);
+    bool istype(inum, uint32_t);
 
 public:
     yfs_client();
@@ -47,6 +46,7 @@ public:
 
     bool isfile(inum);
     bool isdir(inum);
+    bool issymlink(inum);
 
     int getfile(inum, fileinfo &);
     int getdir(inum, dirinfo &);

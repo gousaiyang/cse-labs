@@ -6,7 +6,7 @@
 #include "extent_client.h"
 #include <vector>
 
-#define MAX_FILENAME 255
+#define MAX_FILENAME 255 // Maximum file name length allowed.
 
 class yfs_client {
     extent_client *ec;

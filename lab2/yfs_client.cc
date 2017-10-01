@@ -44,17 +44,17 @@ yfs_client::~yfs_client()
 bool yfs_client::filename_valid(std::string name)
 {
     return !name.empty() && name.length() <= MAX_FILENAME
-        && name.find('/') == std::string::npos && name.find('\0') == std::string::npos;
+           && name.find('/') == std::string::npos && name.find('\0') == std::string::npos;
 }
 
-bool yfs_client::inum_valid(inum inum)
+bool yfs_client::inum_valid(inum inum) // Check whether inum is in the possible range.
 {
     return inum >= 1 && inum <= INODE_NUM;
 }
 
 // Dir entry layout: |<file name length>|<file name>|<inum>|
 
-int yfs_client::writedir(inum dir, std::list<dirent> &list)
+int yfs_client::writedir(inum dir, std::list<dirent> &list) // Write the directory entry table.
 {
     int r = OK;
 
@@ -64,9 +64,12 @@ int yfs_client::writedir(inum dir, std::list<dirent> &list)
     std::ostringstream ost;
 
     for (std::list<dirent>::iterator it = list.begin(); it != list.end(); ++it) {
-        ost.put((unsigned char)it->name.length());
-        ost.write(it->name.c_str(), it->name.length());
-        ost.write((char*)&it->inum, sizeof(inum));
+        if (!ost.put((unsigned char)it->name.length()) ||
+                !ost.write(it->name.c_str(), it->name.length()) ||
+                !ost.write((char*)&it->inum, sizeof(inum))) {
+            printf("Error: ostringstream write failed.\n");
+            return IOERR;
+        }
     }
 
     EXT_RPC(ec->put(dir, ost.str()));
@@ -75,6 +78,7 @@ release:
     return r;
 }
 
+// Helper function to create a given type of inode.
 int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino_out, uint32_t type)
 {
     int r = OK;
@@ -86,6 +90,7 @@ int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino
      * Ignore mode.
      */
 
+    // Check input parameters.
     if (!isdir(parent))
         return IOERR;
 
@@ -97,22 +102,26 @@ int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino
     if (!filename_valid(fname))
         return IOERR;
 
+    // Read the directory entries.
     std::list<dirent> itemlist;
 
     r = readdir(parent, itemlist);
     if (r != OK)
         return r;
 
+    // Check whether the name already exist.
     for (std::list<dirent>::iterator it = itemlist.begin(); it != itemlist.end(); ++it)
         if (it->name == fname)
             return EXIST;
-    
+
     dirent de;
     de.name = fname;
 
+    // Allocate a new inode.
     EXT_RPC(ec->create(type, ino_out));
     de.inum = ino_out;
-    
+
+    // Add the new entry to the directory and write back.
     itemlist.push_back(de);
     r = writedir(parent, itemlist);
 
@@ -120,7 +129,7 @@ release:
     return r;
 }
 
-bool yfs_client::istype(inum inum, uint32_t type)
+bool yfs_client::istype(inum inum, uint32_t type) // Helper function to check inode type.
 {
     extent_protocol::attr a;
 
@@ -252,10 +261,12 @@ int yfs_client::setattr(inum ino, size_t size)
     size_t csize;
     std::string content;
 
+    // Get current content.
     EXT_RPC(ec->get(ino, content));
 
     csize = content.length();
 
+    // Write new content.
     EXT_RPC(ec->put(ino, size > csize ? (content + std::string(size - csize, '\0')) : content.substr(0, size)));
 
 release:
@@ -333,19 +344,22 @@ int yfs_client::readdir(inum dir, std::list<dirent> &list)
     char buf[MAX_FILENAME + 1];
     dirent de;
     int namelen;
-    
+
     EXT_RPC(ec->get(dir, content));
 
     ist.str(content);
 
-    while (ist.get(c)) {
+    while (ist.get(c)) { // Read next file name length.
         namelen = (int)(unsigned char)c;
 
-        if (!ist.read(buf, namelen)) // Note: istringstream::get(buf, namelen) will stop at '\n'!
+        // Read file name.
+        // Note: not using ist.get(buf, namelen) because it will stop at '\n'!
+        if (!ist.read(buf, namelen))
             break;
 
-        de.name = std::string(buf, namelen); // Specify size because istringstream::read will not append '\0'!
+        de.name = std::string(buf, namelen); // Specify size because istringstream::read will not append '\0'.
 
+        // Read inode number.
         if (!ist.read((char*)&de.inum, sizeof(inum)))
             break;
 
@@ -390,6 +404,7 @@ int yfs_client::write(inum ino, size_t size, off_t off, const char *data, size_t
 
     bytes_written = 0;
 
+    // Check input parameters.
     if (!isfile(ino))
         return IOERR;
 
@@ -400,21 +415,24 @@ int yfs_client::write(inum ino, size_t size, off_t off, const char *data, size_t
     std::string content, newcontent;
     char *buf;
 
+    // Read original content.
     EXT_RPC(ec->get(ino, content));
 
     newsize = maxsize2(content.length(), off + size);
 
-    buf = (char*)calloc(newsize, 1);
+    buf = (char*)calloc(newsize, 1); // Buffer already initialized to '\0's.
     if (!buf) {
         printf("Error: calloc failed.\n");
         exit(-1);
     }
 
+    // Construct new content.
     memcpy(buf, content.c_str(), content.length());
     memcpy(buf + off, data, size);
-    newcontent = std::string(buf, newsize); // We have to specify size, or the construction may stop at '\0'.
+    newcontent = std::string(buf, newsize); // We have to specify size, or the construction may stop at '\0'!
     free(buf);
 
+    // Write back.
     EXT_RPC(ec->put(ino, newcontent));
     bytes_written = size;
 
@@ -432,6 +450,7 @@ int yfs_client::unlink(inum parent, const char *name)
      * and update the parent directory content.
      */
 
+    // Check input parameters.
     if (!isdir(parent))
         return IOERR;
 
@@ -442,28 +461,32 @@ int yfs_client::unlink(inum parent, const char *name)
 
     if (!filename_valid(fname))
         return NOENT;
-    
+
+    // Read the directory entries.
     std::list<dirent> itemlist;
 
     r = readdir(parent, itemlist);
     if (r != OK)
         return r;
 
+    // Find position of the name.
     std::list<dirent>::iterator it;
 
     for (it = itemlist.begin(); it != itemlist.end(); ++it)
-        if (it->name == fname) 
+        if (it->name == fname)
             break;
 
-    if (it == itemlist.end())
+    if (it == itemlist.end()) // Name not found.
         return NOENT;
 
-    if (!isfile(it->inum) && !issymlink(it->inum))
+    if (!isfile(it->inum) && !issymlink(it->inum)) // Not a (regular) file or a symlink, cannot unlink.
         return IOERR;
 
+    // Remove the inode.
     EXT_RPC(ec->remove(it->inum));
+
+    // Remove the entry from the directory and write back.
     itemlist.erase(it);
-    
     r = writedir(parent, itemlist);
 
 release:
@@ -472,14 +495,17 @@ release:
 
 int yfs_client::symlink(inum parent, const char *name, const char *target, inum &ino_out)
 {
+    // Check input parameters.
     if (!target || !strlen(target))
         return IOERR;
 
+    // Create a symlink type inode.
     int r = createitem(parent, name, 0, ino_out, extent_protocol::T_SYMLINK);
 
     if (r != OK)
         return r;
 
+    // Write target path as its content.
     EXT_RPC(ec->put(ino_out, std::string(target)));
 
 release:

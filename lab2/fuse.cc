@@ -91,7 +91,7 @@ yfs_client::status getattr(yfs_client::inum inum, struct stat &st)
         st.st_size = info.size;
 
         printf("   getattr -> %llu\n", info.size);
-    } else {
+    } else { // Invalid inode or unimplemented file type.
         return yfs_client::NOENT;
     }
 
@@ -241,7 +241,7 @@ void fuseserver_write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t si
 // @return yfs_client::OK on success, and EXIST if @name already exists.
 //
 yfs_client::status fuseserver_createhelper(fuse_ino_t parent, const char *name,
-    mode_t mode, struct fuse_entry_param *e, int type)
+        mode_t mode, struct fuse_entry_param *e, int type)
 {
     int ret;
     // In yfs, timeouts are always set to 0.0, and generations are always set to 0

@@ -40,7 +40,7 @@ private:
     bool istype(inum, uint32_t);
 
 public:
-    yfs_client();
+    //yfs_client();
     yfs_client(std::string);
     ~yfs_client();
 

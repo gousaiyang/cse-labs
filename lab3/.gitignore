@@ -1,0 +1,7 @@
+*.o
+*.d
+*.tgz
+*.log
+yfs_client
+extent_server
+test-lab-3-g

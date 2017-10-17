@@ -45,7 +45,8 @@ extent_protocol::status extent_client::put(extent_protocol::extentid_t eid, std:
 {
     extent_protocol::status ret = extent_protocol::OK;
     // Your lab3 code goes here
-    ret = cl->call(extent_protocol::put, eid, buf);
+    int unused;
+    ret = cl->call(extent_protocol::put, eid, buf, unused);
     return ret;
 }
 
@@ -53,6 +54,7 @@ extent_protocol::status extent_client::remove(extent_protocol::extentid_t eid)
 {
     extent_protocol::status ret = extent_protocol::OK;
     // Your lab3 code goes here
-    ret = cl->call(extent_protocol::remove, eid);
+    int unused;
+    ret = cl->call(extent_protocol::remove, eid, unused);
     return ret;
 }

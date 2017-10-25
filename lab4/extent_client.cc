@@ -17,6 +17,11 @@ extent_client::extent_client(std::string dst)
     }
 }
 
+extent_client::~extent_client()
+{
+    delete cl;
+}
+
 // a demo to show how to use RPC
 extent_protocol::status extent_client::getattr(extent_protocol::extentid_t eid, extent_protocol::attr &attr)
 {

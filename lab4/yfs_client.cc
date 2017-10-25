@@ -1,4 +1,4 @@
-// yfs client.  implements FS operations using extent server
+// yfs client.  implements FS operations using extent and lock server
 #include "yfs_client.h"
 #include "extent_client.h"
 #include <sstream>
@@ -39,6 +39,7 @@ yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
 yfs_client::~yfs_client()
 {
     delete ec;
+    delete lc;
 }
 
 bool yfs_client::filename_valid(std::string name)

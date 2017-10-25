@@ -10,32 +10,33 @@
 
 lock_client::lock_client(std::string dst)
 {
-  sockaddr_in dstsock;
-  make_sockaddr(dst.c_str(), &dstsock);
-  cl = new rpcc(dstsock);
-  if (cl->bind() < 0) {
-    printf("lock_client: call bind\n");
-  }
+    sockaddr_in dstsock;
+    make_sockaddr(dst.c_str(), &dstsock);
+    cl = new rpcc(dstsock);
+    if (cl->bind() < 0) {
+        printf("lock_client: call bind\n");
+    }
 }
 
-int
-lock_client::stat(lock_protocol::lockid_t lid)
+lock_client::~lock_client()
 {
-  int r;
-  lock_protocol::status ret = cl->call(lock_protocol::stat, cl->id(), lid, r);
-  VERIFY (ret == lock_protocol::OK);
-  return r;
+    delete cl;
 }
 
-lock_protocol::status
-lock_client::acquire(lock_protocol::lockid_t lid)
+int lock_client::stat(lock_protocol::lockid_t lid)
 {
-	// Your lab4 code goes here
+    int r;
+    lock_protocol::status ret = cl->call(lock_protocol::stat, cl->id(), lid, r);
+    VERIFY (ret == lock_protocol::OK);
+    return r;
 }
 
-lock_protocol::status
-lock_client::release(lock_protocol::lockid_t lid)
+lock_protocol::status lock_client::acquire(lock_protocol::lockid_t lid)
 {
-	// Your lab4 code goes here
+    // Your lab4 code goes here
 }
 
+lock_protocol::status lock_client::release(lock_protocol::lockid_t lid)
+{
+    // Your lab4 code goes here
+}

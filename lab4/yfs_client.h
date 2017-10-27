@@ -11,6 +11,7 @@
 #include <vector>
 
 #define MAX_FILENAME 255 // Maximum file name length allowed.
+#define CREATE_LOCK_ID 0
 
 class yfs_client {
     extent_client *ec;
@@ -40,9 +41,15 @@ public:
 private:
     static bool filename_valid(std::string);
     static bool inum_valid(inum);
+
+    // Private helper functions.
+    int readdir_p(inum, std::list<dirent> &);
     int writedir(inum, std::list<dirent> &);
     int createitem(inum, const char *, mode_t, inum &, uint32_t);
     bool istype(inum, uint32_t);
+    bool isfile_p(inum);
+    bool isdir_p(inum);
+    bool issymlink_p(inum);
 
 public:
     //yfs_client();

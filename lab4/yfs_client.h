@@ -11,7 +11,7 @@
 #include <vector>
 
 #define MAX_FILENAME 255 // Maximum file name length allowed.
-#define CREATE_LOCK_ID 0
+#define CREATE_LOCK_ID 0 // Lock id for create inode operations.
 
 class yfs_client {
     extent_client *ec;

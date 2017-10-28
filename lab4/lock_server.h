@@ -11,11 +11,12 @@
 #include "lock_client.h"
 #include "rpc.h"
 
+// A structure to record the state of a lock.
 class lock_state {
 public:
-    bool flag;
-    int holder;
-    int nacquire;
+    bool flag; // Whether this lock is available or acquired.
+    int holder; // The client that is holding this lock.
+    int nacquire; // The times that this lock has been acquired.
     lock_state() {}
     lock_state(bool f, int h, int n): flag(f), holder(h), nacquire(n) {}
 };

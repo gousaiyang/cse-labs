@@ -15,6 +15,8 @@ static inline size_t maxsize2(size_t s1, size_t s2) {
     return s1 > s2 ? s1 : s2;
 }
 
+// Macros for RPC error handling.
+
 #define EXT_RPC(xx) do { \
     if ((xx) != extent_protocol::OK) { \
         printf("EXT_RPC Error: %s:%d \n", __FILE__, __LINE__); \
@@ -171,7 +173,7 @@ int yfs_client::createitem(inum parent, const char *name, mode_t mode, inum &ino
     de.name = fname;
 
     // Allocate a new inode.
-    LCK_RPC(lc->acquire(CREATE_LOCK_ID), IOERR); // lock for create inode operations
+    LCK_RPC(lc->acquire(CREATE_LOCK_ID), IOERR); // Lock for create inode operations.
     EXT_RPC(ec->create(type, ino_out));
     de.inum = ino_out;
 
@@ -364,8 +366,9 @@ int yfs_client::setattr(inum ino, size_t size)
     size_t csize;
     std::string content;
 
-    // Get current content.
     LCK_RPC(lc->acquire(ino), IOERR);
+
+    // Get current content.
     EXT_RPC(ec->get(ino, content));
 
     csize = content.length();
@@ -385,6 +388,7 @@ int yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out
     LCK_RPC(lc->acquire(parent), IOERR);
     r = createitem(parent, name, mode, ino_out, extent_protocol::T_FILE);
     LCK_RPC(lc->release(parent), IOERR);
+
     return r;
 }
 
@@ -395,6 +399,7 @@ int yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
     LCK_RPC(lc->acquire(parent), IOERR);
     r = createitem(parent, name, mode, ino_out, extent_protocol::T_DIR);
     LCK_RPC(lc->release(parent), IOERR);
+
     return r;
 }
 
@@ -556,14 +561,13 @@ int yfs_client::unlink(inum parent, const char *name)
     if (!filename_valid(fname))
         return NOENT;
 
-    // Read the directory entries.
     LCK_RPC(lc->acquire(parent), IOERR);
-
     if (!isdir_p(parent)) {
         r = IOERR;
         goto release;
     }
 
+    // Read the directory entries.
     r = readdir_p(parent, itemlist);
     if (r != OK)
         goto release;
@@ -588,13 +592,13 @@ int yfs_client::unlink(inum parent, const char *name)
     if (!isfile_p(delinum) && !issymlink_p(delinum)) { // Not a (regular) file or a symlink, cannot unlink.
         r = IOERR;
     } else {
-        // Remove the inode.
-        if (ec->remove(delinum) != extent_protocol::OK) {
-            r = IOERR;
-        } else {
-            // Remove the entry from the directory and write back.
-            itemlist.erase(it);
-            r = writedir(parent, itemlist);
+        // Remove the entry from the directory and write back.
+        itemlist.erase(it);
+        r = writedir(parent, itemlist);
+        if (r == OK) {
+            // Remove the inode.
+            if (ec->remove(delinum) != extent_protocol::OK)
+                r = IOERR;
         }
     }
 
@@ -616,19 +620,20 @@ int yfs_client::symlink(inum parent, const char *name, const char *target, inum 
     if (!target || !strlen(target))
         return IOERR;
 
-    // Create a symlink type inode.
     LCK_RPC(lc->acquire(parent), IOERR);
+
+    // Create a symlink type inode.
     r = createitem(parent, name, 0, ino_out, extent_protocol::T_SYMLINK);
 
     if (r != OK)
         goto release;
 
-    // Write target path as its content.
     if (lc->acquire(ino_out) != lock_protocol::OK) {
         r = IOERR;
         goto release;
     }
 
+    // Write target path as its content.
     if (ec->put(ino_out, std::string(target)) != extent_protocol::OK)
         r = IOERR;
 

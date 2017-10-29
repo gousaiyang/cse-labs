@@ -90,7 +90,7 @@ void block_manager::mark_as_allocated_batch(uint32_t to_id) // Mark blocks [0, t
     // Mark whole blocks.
     for (int i = 2; i < last_pos; ++i)
         write_block(i, buf);
-    
+
     read_block(last_pos, buf);
 
     // Mark whole bytes.
@@ -293,7 +293,7 @@ struct inode* inode_manager::get_inode(uint32_t inum)
     if (!ino) {
         printf("Error: malloc failed\n");
         exit(-1);
-    } 
+    }
 
     *ino = *ino_disk;
 
@@ -463,7 +463,7 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
         memcpy(rest_buf, buf + whole_blocks * BLOCK_SIZE, last_bytes);
         bm->write_block(new_blockids[whole_blocks], rest_buf);
     }
-    
+
     // Set new block ids, new size and mtime to inode.
     set_blockids(ino, new_blockids, new_block_num);
     ino->size = size;
@@ -482,7 +482,7 @@ void inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
      * note: get the attributes of inode inum.
      * you can refer to "struct attr" in extent_protocol.h
      */
-    
+
     // Retrieve the corresponding inode.
     inode_t* ino = get_inode(inum);
     if (!ino) {

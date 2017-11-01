@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <assert.h>
+#include <pthread.h>
 #include "extent_protocol.h"
 
 #define DISK_SIZE (1024 * 1024 * 16)
@@ -40,6 +42,7 @@ class block_manager {
 private:
     disk *d;
     std::map <uint32_t, int> using_blocks;
+    pthread_mutex_t alloc_block_mutex; // Mutex to guarantee alloc_block() atomicity.
     int least_available_in_block(const char *block_buf);
     int find_available_slot();
     void mark_as_allocated(uint32_t id);

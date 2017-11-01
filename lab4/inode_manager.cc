@@ -126,6 +126,8 @@ blockid_t block_manager::alloc_block()
              remind yourself of the layout of disk.
      */
 
+    assert(pthread_mutex_lock(&alloc_block_mutex) == 0);
+
     int newid = find_available_slot();
     if (newid == -1) {
         printf("Error: no blocks avaliable!\n");
@@ -133,6 +135,9 @@ blockid_t block_manager::alloc_block()
     }
 
     mark_as_allocated(newid);
+
+    assert(pthread_mutex_unlock(&alloc_block_mutex) == 0);
+
     return newid;
 }
 
@@ -155,6 +160,8 @@ block_manager::block_manager()
 {
     d = new disk();
 
+    assert(pthread_mutex_init(&alloc_block_mutex, NULL) == 0);
+
     // format the disk
     sb.size = BLOCK_SIZE * BLOCK_NUM;
     sb.nblocks = BLOCK_NUM;
@@ -172,6 +179,7 @@ block_manager::block_manager()
 
 block_manager::~block_manager()
 {
+    assert(pthread_mutex_destroy(&alloc_block_mutex) == 0);
     delete d;
 }
 

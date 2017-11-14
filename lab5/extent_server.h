@@ -28,6 +28,9 @@ public:
     int get(extent_protocol::extentid_t id, std::string &);
     int getattr(extent_protocol::extentid_t id, extent_protocol::attr &);
     int remove(extent_protocol::extentid_t id, int &);
+    int commit(uint32_t, int &);
+    int undo(uint32_t, int &);
+    int redo(uint32_t, int &);
 };
 
 #endif

@@ -79,7 +79,9 @@ public:
     int symlink(inum, const char *, const char *, inum &);
     int readlink(inum, std::string &);
 
-    /** you may need to add symbolic link related methods here.*/
+    int commit();
+    int undo();
+    int redo();
 };
 
 #endif

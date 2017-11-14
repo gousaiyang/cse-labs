@@ -497,13 +497,13 @@ struct fuse_lowlevel_ops fuseserver_oper;
 void sig_handler(int signum) {
     switch (signum) {
         case SIGINT:
-            printf("commit a new version\n");
+            yfs->commit(); // Should I check error return values?
             break;
         case SIGUSR1:
-            printf("to previous version\n");
+            yfs->undo();
             break;
         case SIGUSR2:
-            printf("to next version\n");
+            yfs->redo();
             break;
     }
 }

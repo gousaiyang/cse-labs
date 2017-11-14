@@ -82,3 +82,24 @@ int extent_server::remove(extent_protocol::extentid_t id, int &)
 
     return extent_protocol::OK;
 }
+
+int extent_server::commit(uint32_t, int &)
+{
+    printf("extent_server: commit\n");
+
+    return extent_protocol::OK;
+}
+
+int extent_server::undo(uint32_t, int &)
+{
+    printf("extent_server: undo\n");
+
+    return extent_protocol::OK;
+}
+
+int extent_server::redo(uint32_t, int &)
+{
+    printf("extent_server: redo\n");
+
+    return extent_protocol::OK;
+}

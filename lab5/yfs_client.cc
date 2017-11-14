@@ -664,3 +664,33 @@ release:
     LCK_RPC(lc->release(ino), IOERR);
     return r;
 }
+
+int yfs_client::commit()
+{
+    int r = OK;
+
+    EXT_RPC(ec->commit());
+
+release:
+    return r;
+}
+
+int yfs_client::undo()
+{
+    int r = OK;
+
+    EXT_RPC(ec->undo());
+
+release:
+    return r;
+}
+
+int yfs_client::redo()
+{
+    int r = OK;
+
+    EXT_RPC(ec->redo());
+
+release:
+    return r;
+}

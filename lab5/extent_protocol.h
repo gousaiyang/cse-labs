@@ -15,7 +15,10 @@ public:
         get,
         getattr,
         remove,
-        create
+        create,
+        commit,
+        undo,
+        redo
     };
 
     enum types {

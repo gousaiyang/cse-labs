@@ -21,6 +21,7 @@ typedef uint32_t blockid_t;
 // disk layer -----------------------------------------
 
 class disk {
+    friend class block_manager;
 private:
     unsigned char blocks[BLOCK_NUM][BLOCK_SIZE];
 
@@ -39,6 +40,7 @@ typedef struct superblock {
 } superblock_t;
 
 class block_manager {
+    friend class inode_manager;
 private:
     disk *d;
     std::map <uint32_t, int> using_blocks;
@@ -48,6 +50,7 @@ private:
     void mark_as_allocated(uint32_t id);
     void mark_as_allocated_batch(uint32_t to_id);
     void mark_as_free(uint32_t id);
+    char* get_disk_ptr();
 public:
     block_manager();
     ~block_manager();
@@ -98,12 +101,16 @@ typedef struct inode {
 } inode_t;
 
 class inode_manager {
+    friend class extent_server;
 private:
     block_manager *bm;
+    bool uncommitted;
+    int current_version;
     struct inode* get_inode(uint32_t inum);
     void put_inode(uint32_t inum, struct inode *ino);
     void get_blockids(const inode_t *ino, blockid_t *bids, int cnt);
     void set_blockids(inode_t *ino, const blockid_t *bids, int cnt);
+    char* get_disk_ptr();
 public:
     inode_manager();
     ~inode_manager();

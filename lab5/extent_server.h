@@ -5,6 +5,7 @@
 
 #include <string>
 #include <map>
+#include <vector>
 #include "extent_protocol.h"
 #include "inode_manager.h"
 
@@ -18,6 +19,8 @@ protected:
     std::map <extent_protocol::extentid_t, extent_t> extents;
 #endif
     inode_manager *im;
+    void read_log_entries(std::vector<std::string> &log_entries);
+    void write_log_entries(std::vector<std::string> &log_entries);
 
 public:
     extent_server();

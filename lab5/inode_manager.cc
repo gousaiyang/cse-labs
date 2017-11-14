@@ -113,6 +113,11 @@ void block_manager::mark_as_free(uint32_t id)
     write_block(pos, buf);
 }
 
+char* block_manager::get_disk_ptr()
+{
+    return (char*)d->blocks;
+}
+
 // Allocate a free disk block.
 blockid_t block_manager::alloc_block()
 {
@@ -203,6 +208,8 @@ inode_manager::inode_manager()
         printf("\tim: error! alloc first inode %d, should be 1\n", root_dir);
         exit(0);
     }
+    uncommitted = false;
+    current_version = -1;
 }
 
 inode_manager::~inode_manager()
@@ -353,6 +360,11 @@ void inode_manager::set_blockids(inode_t *ino, const blockid_t *bids, int cnt) /
         memcpy(buf, bids + NDIRECT, (cnt - NDIRECT) * sizeof(blockid_t));
         bm->write_block(ino->blocks[NDIRECT], buf);
     }
+}
+
+char* inode_manager::get_disk_ptr()
+{
+    return bm->get_disk_ptr();
 }
 
 #define MIN(a,b) ((a)<(b) ? (a) : (b)) // Seems unused.

@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
 #include <arpa/inet.h>
 #include "lang/verify.h"
 #include "yfs_client.h"
@@ -493,6 +494,20 @@ void fuseserver_readlink(fuse_req_t req, fuse_ino_t ino)
 
 struct fuse_lowlevel_ops fuseserver_oper;
 
+void sig_handler(int signum) {
+    switch (signum) {
+        case SIGINT:
+            printf("commit a new version\n");
+            break;
+        case SIGUSR1:
+            printf("to previous version\n");
+            break;
+        case SIGUSR2:
+            printf("to next version\n");
+            break;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     char *mountpoint = 0;
@@ -520,6 +535,16 @@ int main(int argc, char *argv[])
 
     yfs = new yfs_client(argv[2], argv[3], argv[4]);
     // yfs = new yfs_client();
+
+    struct sigaction act;
+
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = sig_handler;
+
+    if (sigaction(SIGINT, &act, 0) < 0 || sigaction(SIGUSR1, &act, 0) < 0 || sigaction(SIGUSR2, &act, 0) < 0) {
+        fprintf(stderr, "Error: failed to register signal handler\n");
+        exit(1);
+    }
 
     fuseserver_oper.getattr    = fuseserver_getattr;
     fuseserver_oper.statfs     = fuseserver_statfs;

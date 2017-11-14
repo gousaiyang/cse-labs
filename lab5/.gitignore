@@ -1,6 +1,13 @@
 *.o
 *.d
+*.tgz
 lab1_tester
 *.log
 foo.txt.yfs*
 tmprand
+yfs_client
+extent_server
+lock_demo
+lock_server
+lock_tester
+test-lab-5

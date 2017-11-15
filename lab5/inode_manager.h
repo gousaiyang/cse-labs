@@ -22,6 +22,8 @@ typedef uint32_t blockid_t;
 
 class disk {
     friend class block_manager;
+    friend class inode_manager;
+    friend class extent_server;
 private:
     unsigned char blocks[BLOCK_NUM][BLOCK_SIZE];
 
@@ -41,6 +43,7 @@ typedef struct superblock {
 
 class block_manager {
     friend class inode_manager;
+    friend class extent_server;
 private:
     disk *d;
     std::map <uint32_t, int> using_blocks;

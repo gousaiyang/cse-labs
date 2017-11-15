@@ -6,6 +6,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <semaphore.h>
 #include "extent_protocol.h"
 #include "inode_manager.h"
 
@@ -19,8 +20,12 @@ protected:
     std::map <extent_protocol::extentid_t, extent_t> extents;
 #endif
     inode_manager *im;
-    void read_log_entries(std::vector<std::string> &log_entries);
-    void write_log_entries(std::vector<std::string> &log_entries);
+    int readcount, writecount;
+    sem_t rmutex, wmutex, readtry, resource;
+    void reader_prologue();
+    void reader_epilogue();
+    void writer_prologue();
+    void writer_epilogue();
 
 public:
     extent_server();

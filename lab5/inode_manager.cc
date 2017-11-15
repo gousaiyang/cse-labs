@@ -387,6 +387,16 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
         return;
     }
 
+    // Handle inode with no content.
+    if (ino->size == 0) {
+        *size = 0;
+        *buf_out = NULL;
+        ino->atime = (unsigned int)time(NULL);
+        put_inode(inum, ino);
+        free(ino);
+        return;
+    }
+
     // Return inode size and set returned data pointer.
     *size = ino->size;
     *buf_out = (char*)malloc(ino->size);

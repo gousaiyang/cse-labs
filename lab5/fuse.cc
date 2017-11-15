@@ -497,7 +497,7 @@ struct fuse_lowlevel_ops fuseserver_oper;
 void sig_handler(int signum) {
     switch (signum) {
         case SIGINT:
-            yfs->commit(); // Should I check error return values?
+            yfs->commit();
             break;
         case SIGUSR1:
             yfs->undo();

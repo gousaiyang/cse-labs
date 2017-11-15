@@ -90,12 +90,6 @@ extent_server::extent_server()
 {
     im = new inode_manager();
 
-    std::fstream f(vc_logfile, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
-    if (!f.is_open()) {
-        printf("Error: cannot open version log file\n");
-        exit(1);
-    }
-
     readcount = 0;
     writecount = 0;
 
@@ -104,10 +98,19 @@ extent_server::extent_server()
     Sem_init(&readtry, 0, 1);
     Sem_init(&resource, 0, 1);
 
+    std::fstream fc(vc_logfile, std::ios_base::app);
+    if (!fc.is_open()) {
+        printf("Error: cannot create version log file\n");
+        exit(1);
+    }
+    fc.close();
+    std::fstream f(vc_logfile, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     int cnt = 0;
     f.read((char*)&cnt, sizeof(int));
-    if (f.eof())
+    if (f.eof()) {
+        f.clear();
         f.write((char*)&cnt, sizeof(int));
+    }
     f.close();
 
     int unused;
@@ -136,11 +139,15 @@ int extent_server::create(uint32_t type, extent_protocol::extentid_t &id)
 
     reader_epilogue();
 
+    printf("extent_server: create inode success\n");
+
     return extent_protocol::OK;
 }
 
 int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &)
 {
+    printf("extent_server: put %lld\n", id);
+
     reader_prologue();
 
     id &= 0x7fffffff;
@@ -151,6 +158,8 @@ int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &)
     im->uncommitted = true;
 
     reader_epilogue();
+
+    printf("extent_server: put %lld success\n", id);
 
     return extent_protocol::OK;
 }
@@ -176,6 +185,8 @@ int extent_server::get(extent_protocol::extentid_t id, std::string &buf)
 
     reader_epilogue();
 
+    printf("extent_server: get %lld success\n", id);
+
     return extent_protocol::OK;
 }
 
@@ -194,6 +205,8 @@ int extent_server::getattr(extent_protocol::extentid_t id, extent_protocol::attr
 
     reader_epilogue();
 
+    printf("extent_server: getattr %lld success\n", id);
+
     return extent_protocol::OK;
 }
 
@@ -209,12 +222,16 @@ int extent_server::remove(extent_protocol::extentid_t id, int &)
 
     reader_epilogue();
 
+    printf("extent_server: remove %lld success\n", id);
+
     return extent_protocol::OK;
 }
 
 int extent_server::commit(uint32_t, int &)
 {
     printf("extent_server: commit\n");
+
+    int cv;
 
     writer_prologue();
 
@@ -228,8 +245,11 @@ int extent_server::commit(uint32_t, int &)
     f.write((char*)&cnt, sizeof(int));
     f.close();
     im->uncommitted = false;
+    cv = im->current_version;
 
     writer_epilogue();
+
+    printf("extent_server: commit success, current version is %d\n", cv);
 
     return extent_protocol::OK;
 }
@@ -237,6 +257,8 @@ int extent_server::commit(uint32_t, int &)
 int extent_server::undo(uint32_t, int &)
 {
     printf("extent_server: undo\n");
+
+    int cv;
 
     writer_prologue();
 
@@ -253,9 +275,13 @@ int extent_server::undo(uint32_t, int &)
         }
     }
 
+    fin.close();
+
+    cv = im->current_version;
+
     writer_epilogue();
 
-    fin.close();
+    printf("extent_server: undo success, current version is %d\n", cv);
 
     return extent_protocol::OK;
 }
@@ -263,6 +289,8 @@ int extent_server::undo(uint32_t, int &)
 int extent_server::redo(uint32_t, int &)
 {
     printf("extent_server: redo\n");
+
+    int cv;
 
     writer_prologue();
 
@@ -278,7 +306,11 @@ int extent_server::redo(uint32_t, int &)
 
     fin.close();
 
+    cv = im->current_version;
+
     writer_epilogue();
+
+    printf("extent_server: redo success, current version is %d\n", cv);
 
     return extent_protocol::OK;
 }

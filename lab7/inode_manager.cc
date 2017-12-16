@@ -1,6 +1,96 @@
 #include <pthread.h>
 #include "inode_manager.h"
 
+void print_string_hex(const char* buf, int size) //###
+{
+    printf("---hex start---\n");
+    for (int i = 0; i < size; ++i)
+        printf("%02x ", (byte)buf[i]);
+
+    printf("\n---hex end---\n");
+}
+
+/* Fill a byte (b0b1b2b3b4b5b6b7) with one of its bits in a given range (place 0 at other positions).
+ * Example: bit_expand(0b00100000, 2, 0b00111100) = 0b00111100 */
+inline byte bit_expand(byte c, int pos, int range)
+{
+    return (byte)(((int)c << (pos + 24) >> 31) & range);
+}
+
+// Extract a bit from a byte (b0b1b2b3b4b5b6b7) at the given position.
+inline bool get_bit(byte c, int pos)
+{
+    return (bool)(c & (1 << (7 - pos)));
+}
+
+// Find majority of 5 bits.
+inline bool voter_5(bool x1, bool x2, bool x3, bool x4, bool x5)
+{
+    return x1 + x2 + x3 + x4 + x5 >= 3;
+}
+
+// Construct a byte (b0b1b2b3b4b5b6b7) from 8 bits.
+inline byte construct_byte(bool b0, bool b1, bool b2, bool b3, bool b4, bool b5, bool b6, bool b7)
+{
+    return (byte)(b0 << 7 | b1 << 6 | b2 << 5 | b3 << 4 | b4 << 3 | b5 << 2 | b6 << 1 | b7);
+}
+
+/* For every byte b0b1b2b3b4b5b6b7, encoded result is 5 bytes as follows:
+ * b0b0b0b0b0b1b1b1 b1b1b2b2b2b2b2b3 b3b3b3b3b4b4b4b4 b4b5b5b5b5b5b6b6 b6b6b6b7b7b7b7b7 */
+std::string encode_data(const std::string &data)
+{
+    std::string result;
+    int len = data.length();
+
+    for (int i = 0; i < len; ++i) {
+        // printf(">>> inode_manager::encode_data: processing byte %02x\n", (byte)data[i]); //###
+        result.push_back(bit_expand(data[i], 0, 0xf8) | bit_expand(data[i], 1, 0x7));
+        result.push_back(bit_expand(data[i], 1, 0xc0) | bit_expand(data[i], 2, 0x3e) | bit_expand(data[i], 3, 0x1));
+        result.push_back(bit_expand(data[i], 3, 0xf0) | bit_expand(data[i], 4, 0xf));
+        result.push_back(bit_expand(data[i], 4, 0x80) | bit_expand(data[i], 5, 0x7c) | bit_expand(data[i], 6, 0x3));
+        result.push_back(bit_expand(data[i], 6, 0xe0) | bit_expand(data[i], 7, 0x1f));
+        // printf(">>> inode_manager::encode_data: partial encoded bytes %02x %02x %02x %02x %02x\n",
+        //     (byte)result[result.length()-5],
+        //     (byte)result[result.length()-4],
+        //     (byte)result[result.length()-3],
+        //     (byte)result[result.length()-4],
+        //     (byte)result[result.length()-1]); //###
+    }
+
+    return result;
+}
+
+std::string decode_data(const std::string &data)
+{
+    int len = data.length();
+    if (len % 5) {
+        printf("Error: encoded data size should be a multiple of 5");
+        exit(-1);
+        return std::string();
+    }
+
+    int parts = len / 5;
+    std::string result;
+    for (int i = 0; i < parts; ++i) {
+        int byte0 = data[i * 5];
+        int byte1 = data[i * 5 + 1];
+        int byte2 = data[i * 5 + 2];
+        int byte3 = data[i * 5 + 3];
+        int byte4 = data[i * 5 + 4];
+        bool bit0 = voter_5(get_bit(byte0, 0), get_bit(byte0, 1), get_bit(byte0, 2), get_bit(byte0, 3), get_bit(byte0, 4));
+        bool bit1 = voter_5(get_bit(byte0, 5), get_bit(byte0, 6), get_bit(byte0, 7), get_bit(byte1, 0), get_bit(byte1, 1));
+        bool bit2 = voter_5(get_bit(byte1, 2), get_bit(byte1, 3), get_bit(byte1, 4), get_bit(byte1, 5), get_bit(byte1, 6));
+        bool bit3 = voter_5(get_bit(byte1, 7), get_bit(byte2, 0), get_bit(byte2, 1), get_bit(byte2, 2), get_bit(byte2, 3));
+        bool bit4 = voter_5(get_bit(byte2, 4), get_bit(byte2, 5), get_bit(byte2, 6), get_bit(byte2, 7), get_bit(byte3, 0));
+        bool bit5 = voter_5(get_bit(byte3, 1), get_bit(byte3, 2), get_bit(byte3, 3), get_bit(byte3, 4), get_bit(byte3, 5));
+        bool bit6 = voter_5(get_bit(byte3, 6), get_bit(byte3, 7), get_bit(byte4, 0), get_bit(byte4, 1), get_bit(byte4, 2));
+        bool bit7 = voter_5(get_bit(byte4, 3), get_bit(byte4, 4), get_bit(byte4, 5), get_bit(byte4, 6), get_bit(byte4, 7));
+        result.push_back(construct_byte(bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7));
+    }
+
+    return result;
+}
+
 // disk layer -----------------------------------------
 
 disk::disk()
@@ -416,32 +506,46 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     char buf[BLOCK_SIZE];
     blockid_t read_blockids[MAXFILE];
 
-    int whole_blocks = ino->size / BLOCK_SIZE;
-    int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
-    int last_bytes = ino->size % BLOCK_SIZE;
+    int encoded_size = ENCODED_SIZE(ino->size);
+    int whole_blocks = encoded_size / BLOCK_SIZE;
+    int total_blocks = CEIL_DIV(encoded_size, BLOCK_SIZE);
+    int last_bytes = encoded_size % BLOCK_SIZE;
+    char *encoded_buf = (char*)malloc(encoded_size);
 
     // Get block ids of the inode.
     get_blockids(ino, read_blockids, total_blocks);
 
     // Read data and transfer to returned data pointer.
     for (int i = 0; i < whole_blocks; ++i)
-        bm->read_block(read_blockids[i], *buf_out + i * BLOCK_SIZE);
+        bm->read_block(read_blockids[i], encoded_buf + i * BLOCK_SIZE);
 
     if (last_bytes) {
         bm->read_block(read_blockids[whole_blocks], buf);
-        memcpy(*buf_out + whole_blocks * BLOCK_SIZE, buf, last_bytes);
+        memcpy(encoded_buf + whole_blocks * BLOCK_SIZE, buf, last_bytes);
     }
+
+    std::string decoded_data = decode_data(std::string(encoded_buf, encoded_size));
+    // printf(">>> In read file: inum = %u, encoded data = (%d) %s\n", inum, encoded_size, encoded_buf); //###
+    printf(">>> In read file: inum = %u, encoded data size = (%d)\n", inum, encoded_size); //###
+    // print_string_hex(encoded_buf, encoded_size); // ###
+    // printf(">>> In read file: inum = %u, decoded data = (%d) %s\n", inum, (int)decoded_data.length(), decoded_data.c_str()); //###
+    printf(">>> In read file: inum = %u, decoded data size = (%d)\n", inum, (int)decoded_data.length()); //###
+    // print_string_hex(decoded_data.c_str(), decoded_data.length()); // ###
+    free(encoded_buf);
+    memcpy(*buf_out, decoded_data.c_str(), decoded_data.length());
 
     // Set atime of inode.
     ino->atime = (unsigned int)time(NULL);
     put_inode(inum, ino);
+
+    write_file(inum, decoded_data.c_str(), decoded_data.length(), false);
 
     // Free memory allocated by get_inode().
     free(ino);
 }
 
 /* alloc/free blocks if needed */
-void inode_manager::write_file(uint32_t inum, const char *buf, int size)
+void inode_manager::write_file(uint32_t inum, const char *buf, int size, bool set_timestamps /*= true*/)
 {
     /*
      * your lab1 code goes here.
@@ -465,11 +569,16 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
     char rest_buf[BLOCK_SIZE];
 
     // Get original block ids.
-    int old_block_num = CEIL_DIV(ino->size, BLOCK_SIZE);
+    int old_block_num = CEIL_DIV(ENCODED_SIZE(ino->size), BLOCK_SIZE);
     get_blockids(ino, new_blockids, old_block_num);
 
     // Adjust block ids.
-    int new_block_num = CEIL_DIV(size, BLOCK_SIZE);
+    int new_encoded_size = ENCODED_SIZE(size);
+    int new_block_num = CEIL_DIV(new_encoded_size, BLOCK_SIZE);
+    if (new_block_num > MAXFILE) {
+        printf("Error: file too large");
+        exit(-1);
+    }
     int diff_num;
 
     if (new_block_num > old_block_num) { // Need to allocated more blocks.
@@ -490,22 +599,32 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size)
     }
 
     // Write data to data blocks.
-    int whole_blocks = size / BLOCK_SIZE;
-    int last_bytes = size % BLOCK_SIZE;
+    int whole_blocks = new_encoded_size / BLOCK_SIZE;
+    int last_bytes = new_encoded_size % BLOCK_SIZE;
+    std::string encoded_string = encode_data(std::string(buf, size));
+    const char *encoded_buf = encoded_string.c_str();
+    // printf(">>> In write file: inum = %u, original data = (%d) %s\n", inum, size, buf); //###
+    printf(">>> In write file: inum = %u, original data size = (%d)\n", inum, size); //###
+    // print_string_hex(buf, size); //###
+    // printf(">>> In write file: inum = %u, encoded data = (%d) %s\n", inum, encoded_string.length(), encoded_buf); //###
+    printf(">>> In write file: inum = %u, encoded data size = (%d)\n", inum, encoded_string.length()); //###
+    // print_string_hex(encoded_buf, encoded_string.length()); //###
 
     for (int i = 0; i < whole_blocks; ++i)
-        bm->write_block(new_blockids[i], buf + i * BLOCK_SIZE);
+        bm->write_block(new_blockids[i], encoded_buf + i * BLOCK_SIZE);
 
     if (last_bytes) {
-        memcpy(rest_buf, buf + whole_blocks * BLOCK_SIZE, last_bytes);
+        memcpy(rest_buf, encoded_buf + whole_blocks * BLOCK_SIZE, last_bytes);
         bm->write_block(new_blockids[whole_blocks], rest_buf);
     }
 
     // Set new block ids, new size and mtime to inode.
     set_blockids(ino, new_blockids, new_block_num);
     ino->size = size;
-    ino->mtime = (unsigned int)time(NULL);
-    ino->ctime = (unsigned int)time(NULL);
+    if (set_timestamps) {
+        ino->mtime = (unsigned int)time(NULL);
+        ino->ctime = (unsigned int)time(NULL);
+    }
     put_inode(inum, ino);
 
     // Free memory allocated by get_inode().
@@ -557,7 +676,7 @@ void inode_manager::remove_file(uint32_t inum)
     // Get block ids of the inode.
     blockid_t remove_blockids[MAXFILE];
 
-    int total_blocks = CEIL_DIV(ino->size, BLOCK_SIZE);
+    int total_blocks = CEIL_DIV(ENCODED_SIZE(ino->size), BLOCK_SIZE);
     get_blockids(ino, remove_blockids, total_blocks);
 
     // Free all the data blocks.

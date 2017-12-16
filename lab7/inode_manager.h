@@ -7,16 +7,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <time.h>
 #include <assert.h>
 #include <pthread.h>
 #include "extent_protocol.h"
 
-#define DISK_SIZE (1024 * 1024 * 16)
-#define BLOCK_SIZE 512
+#define DISK_SIZE (1024 * 1024 * 32)
+#define BLOCK_SIZE 1024
 #define BLOCK_NUM (DISK_SIZE / BLOCK_SIZE)
 
 typedef uint32_t blockid_t;
+
+// redundant encode and decode for fault tolerance
+
+#define ENCODED_SIZE(x) ((x) * 5)
+#define ENCODE_EXTRA_SIZE(x) ((x) * 4)
+typedef unsigned char byte;
+inline byte bit_expand(byte c, int pos, int range);
+inline bool get_bit(byte c, int pos);
+inline bool voter_5(bool x1, bool x2, bool x3, bool x4, bool x5);
+inline byte construct_byte(bool b0, bool b1, bool b2, bool b3, bool b4, bool b5, bool b6, bool b7);
+std::string encode_data(const std::string &data);
+std::string decode_data(const std::string &data);
 
 // disk layer -----------------------------------------
 
@@ -86,7 +99,7 @@ public:
 #define BBLOCK(b) ((b) / BPB + 2)
 
 // Direct/indirect blocks number
-#define NDIRECT 32
+#define NDIRECT 100
 #define NINDIRECT (BLOCK_SIZE / sizeof(uint))
 #define MAXFILE (NDIRECT + NINDIRECT)
 
@@ -120,7 +133,7 @@ public:
     uint32_t alloc_inode(uint32_t type);
     void free_inode(uint32_t inum);
     void read_file(uint32_t inum, char **buf, int *size);
-    void write_file(uint32_t inum, const char *buf, int size);
+    void write_file(uint32_t inum, const char *buf, int size, bool set_timestamps = true);
     void remove_file(uint32_t inum);
     void getattr(uint32_t inum, extent_protocol::attr &a);
 };

@@ -10,78 +10,78 @@
 #include "extent_client.h"
 #include <vector>
 
+#define MAX_FILENAME 255 // Maximum file name length allowed.
+#define CREATE_LOCK_ID 0 // Lock id for create inode operations.
 
-#define CA_FILE "./cert/ca.pem:
-#define USERFILE	"./etc/passwd"
-#define GROUPFILE	"./etc/group"
-
+#define CA_FILE "./cert/ca.pem"
+#define USERFILE "./etc/passwd"
+#define GROUPFILE "./etc/group"
 
 class yfs_client {
-  extent_client *ec;
-  lock_client *lc;
- public:
+    extent_client *ec;
+    lock_client *lc;
 
-  typedef unsigned long long inum;
-  enum xxstatus { OK, RPCERR, NOENT, IOERR, EXIST,
-  			NOPEM, ERRPEM, EINVA, ECTIM, ENUSE };
+public:
+    typedef unsigned long long inum;
+    enum xxstatus { OK, RPCERR, NOENT, IOERR, EXIST, NOPEM, ERRPEM, EINVA, ECTIM, ENUSE };
+    typedef int status;
 
-  typedef int status;
+    struct fileinfo {
+        unsigned long long size;
+        unsigned long atime;
+        unsigned long mtime;
+        unsigned long ctime;
+    };
+    struct dirinfo {
+        unsigned long atime;
+        unsigned long mtime;
+        unsigned long ctime;
+    };
+    struct dirent {
+        std::string name;
+        yfs_client::inum inum;
+    };
 
+private:
+    static bool filename_valid(std::string);
+    static bool inum_valid(inum);
 
-  struct filestat {
-  	unsigned long long size;
-	unsigned long mode;
-	unsigned short uid;
-	unsigned short gid;
-  };
+    // Private helper functions.
+    int readdir_p(inum, std::list<dirent> &);
+    int writedir(inum, std::list<dirent> &);
+    int createitem(inum, const char *, mode_t, inum &, uint32_t);
+    bool istype(inum, uint32_t);
+    bool isfile_p(inum);
+    bool isdir_p(inum);
+    bool issymlink_p(inum);
 
-  struct fileinfo {
-    unsigned long long size;
-    unsigned long atime;
-    unsigned long mtime;
-    unsigned long ctime;
-	unsigned long mode;
-	unsigned short uid;
-	unsigned short gid;
-  };
-  struct dirinfo {
-    unsigned long atime;
-    unsigned long mtime;
-    unsigned long ctime;
-	unsigned long mode;
-	unsigned short uid;
-	unsigned short gid;
-  };
+public:
+    //yfs_client();
+    yfs_client(std::string, std::string, const char*);
+    ~yfs_client();
 
-  struct dirent {
-    std::string name;
-    yfs_client::inum inum;
-  };
+    bool isfile(inum);
+    bool isdir(inum);
+    bool issymlink(inum);
 
- private:
-  static std::string filename(inum);
-  static inum n2i(std::string);
+    int getfile(inum, fileinfo &);
+    int getdir(inum, dirinfo &);
+    int getsymlink(inum, fileinfo &);
 
- public:
-  yfs_client();
-  yfs_client(std::string, std::string, const char*);
+    int setattr(inum, size_t);
+    int lookup(inum, const char *, bool &, inum &);
+    int create(inum, const char *, mode_t, inum &);
+    int readdir(inum, std::list<dirent> &);
+    int write(inum, size_t, off_t, const char *, size_t &);
+    int read(inum, size_t, off_t, std::string &);
+    int unlink(inum, const char *);
+    int mkdir(inum, const char *, mode_t, inum &);
+    int symlink(inum, const char *, const char *, inum &);
+    int readlink(inum, std::string &);
 
-  bool isfile(inum);
-  bool isdir(inum);
-
-  int getfile(inum, fileinfo &);
-  int getdir(inum, dirinfo &);
-
-  int setattr(inum, filestat, unsigned long);
-  int lookup(inum, const char *, bool &, inum &);
-  int create(inum, const char *, mode_t, inum &);
-  int readdir(inum, std::list<dirent> &);
-  int write(inum, size_t, off_t, const char *, size_t &);
-  int read(inum, size_t, off_t, std::string &);
-  int unlink(inum,const char *);
-  int mkdir(inum , const char *, mode_t , inum &);
-
-  int verify(const char* cert_file, unsigned short*);
+    int commit();
+    int undo();
+    int redo();
 };
 
-#endif 
+#endif

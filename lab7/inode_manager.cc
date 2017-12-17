@@ -1,32 +1,6 @@
 #include <pthread.h>
 #include "inode_manager.h"
 
-void print_string_hex(const char* buf, int size) //###
-{
-    printf("---hex start---\n");
-    int cnt = 0;
-    byte last = (byte)buf[0];
-    for (int i = 0; i < size; ++i) {
-        byte b = (byte)buf[i];
-        if (b != last) {
-            if (cnt > 1)
-                printf("%02x*%d ", last, cnt);
-            else
-                printf("%02x ", last);
-            cnt = 1;
-        } else {
-            ++cnt;
-        }
-        last = b;
-    }
-    if (cnt > 1)
-        printf("%02x*%d ", last, cnt);
-    else
-        printf("%02x ", last);
-
-    printf("\n---hex end---\n");
-}
-
 // Extract a bit from a byte (b0b1b2b3b4b5b6b7) at the given position.
 inline bool get_bit(byte c, int pos)
 {
@@ -45,13 +19,16 @@ inline byte construct_byte(bool b0, bool b1, bool b2, bool b3, bool b4, bool b5,
     return (byte)(b0 << 7 | b1 << 6 | b2 << 5 | b3 << 4 | b4 << 3 | b5 << 2 | b6 << 1 | b7);
 }
 
-// Encode two bits b0b1 to b0,b0,b0,b1,b1,b1,b0^b1,b0^b1
+/* Encode two bits b0b1 to b0,b0,b0,b1,b1,b1,b0^b1,b0^b1.
+ * In this encoding, we can detect and correct 2 bit flips in every byte.
+ * To achieve this, the hamming distance of any two valid encoding should be >= 5.
+ */
 inline byte encode2to8(bool b0, bool b1)
 {
     return construct_byte(b0, b0, b0, b1, b1, b1, b0 ^ b1, b0 ^ b1);
 }
 
-// Decode the above encoding, every byte can tolerate 2 bit flips.
+// Decode the above encoding, correcting at most 2 bit flips.
 inline void decode2to8(byte data, bool &b0, bool &b1)
 {
     bool bit0 = get_bit(data, 0);
@@ -63,17 +40,23 @@ inline void decode2to8(byte data, bool &b0, bool &b1)
     bool bit6 = get_bit(data, 6);
     bool bit7 = get_bit(data, 7);
 
-    bool b0_agree = (bit0 == bit1 && bit1 == bit2);
-    bool b1_agree = (bit3 == bit4 && bit4 == bit5);
-    bool xor_agree = (bit6 == bit7);
+    bool b0_agree = (bit0 == bit1 && bit1 == bit2); // Does part0 agree?
+    bool b1_agree = (bit3 == bit4 && bit4 == bit5); // Does part1 agree?
+    bool xor_agree = (bit6 == bit7); // Does the xor part agree?
 
     if (b0_agree == b1_agree || !xor_agree) {
+        /* b0_agree && b1_agree -> both part0 and part1 are not damaged
+         * !b0_agree && !b1_agree -> both part0 and part1 have 1 bit error, use voter
+         * (b0_agree ^ b1_agree) && !xor_agree -> the xor part and one of part0 and part1 both have have 1 bit error, use voter
+         */
         b0 = voter_3(bit0, bit1, bit2);
         b1 = voter_3(bit3, bit4, bit5);
     } else if (b0_agree) {
+        // b0_agree && !b1_agree && xor_agree -> part0 and the xor part not damaged, use them to fix bit1
         b0 = bit0;
         b1 = bit0 ^ bit6;
     } else {
+        // !b0_agree && b1_agree && xor_agree -> part1 and the xor part not damaged, use them to fix bit0
         b0 = bit3 ^ bit6;
         b1 = bit3;
     }
@@ -102,7 +85,6 @@ std::string decode_data(const std::string &data)
     int len = data.length();
     if (len % 4) {
         printf("Error: encoded data size should be a multiple of 4");
-        exit(-1);
         return std::string();
     }
 
@@ -164,39 +146,35 @@ void disk::write_block(blockid_t id, const char *buf)
 
 // block layer -----------------------------------------
 
+// Encode all bitmap blocks.
 void block_manager::encode_bitmap_all()
 {
     for (int i = 0; i < BITMAP_BLOCKS; ++i)
         encode_bitmap(2 + i);
 }
 
+// Decode all bitmap blocks.
 void block_manager::decode_bitmap_all()
 {
     for (int i = 0; i < BITMAP_BLOCKS; ++i)
         decode_bitmap(2 + i);
 }
 
+// Encode a specified bitmap block.
 void block_manager::encode_bitmap(uint32_t bblock)
 {
     std::string bitmap_data, encoded_bitmap;
     char buf[BLOCK_SIZE];
 
+    // Read original bitmap data.
     read_block(bblock, buf);
     bitmap_data = std::string(buf, BLOCK_SIZE);
+
+    // Apply encoding.
     encoded_bitmap = encode_data(bitmap_data);
     const char *encoded_buf = encoded_bitmap.c_str();
-    // printf(">>>block_manager::encode_bitmap: old bitmap part 1\n"); //###
-    // print_string_hex(get_disk_ptr() + 2 * BLOCK_SIZE, BITMAP_BLOCKS * BLOCK_SIZE); //###
-    // printf(">>>block_manager::encode_bitmap: old bitmap part 2\n"); //###
-    // print_string_hex(get_disk_ptr() + (2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS) * BLOCK_SIZE,
-    //     ENCODE_EXTRA_SIZE(BITMAP_BLOCKS * BLOCK_SIZE)); //###
-    // printf(">>>block_manager::encode_bitmap: read at %d, write at %d\n", bblock,
-    //     2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE(bblock - 2)); //###
-    // printf(">>>block_manager::encode_bitmap: original size = %d\n", (int)bitmap_data.length()); //###
-    // print_string_hex(bitmap_data.c_str(), bitmap_data.length()); //###
-    // printf(">>>block_manager::encode_bitmap: encoded size = %d\n", (int)encoded_bitmap.length()); //###
-    // print_string_hex(encoded_bitmap.c_str(), encoded_bitmap.length()); //###
 
+    // Write encoded bitmap data to its corresponding positions.
     write_block(bblock, encoded_buf);
     encoded_buf += BLOCK_SIZE;
 
@@ -204,19 +182,15 @@ void block_manager::encode_bitmap(uint32_t bblock)
         write_block(2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE(bblock - 2) + i, encoded_buf);
         encoded_buf += BLOCK_SIZE;
     }
-
-    // printf(">>>block_manager::encode_bitmap: new bitmap part 1\n"); //###
-    // print_string_hex(get_disk_ptr() + 2 * BLOCK_SIZE, BITMAP_BLOCKS * BLOCK_SIZE); //###
-    // printf(">>>block_manager::encode_bitmap: new bitmap part 2\n"); //###
-    // print_string_hex(get_disk_ptr() + (2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS) * BLOCK_SIZE,
-    //     ENCODE_EXTRA_SIZE(BITMAP_BLOCKS * BLOCK_SIZE)); //###
 }
 
+// Decode a specified bitmap block.
 void block_manager::decode_bitmap(uint32_t bblock)
 {
     std::string encoded_bitmap, decoded_bitmap;
     char buf[BLOCK_SIZE];
 
+    // Read encoded bitmap data from its corresponding positions.
     read_block(bblock, buf);
     encoded_bitmap += std::string(buf, BLOCK_SIZE);
 
@@ -225,27 +199,12 @@ void block_manager::decode_bitmap(uint32_t bblock)
         encoded_bitmap += std::string(buf, BLOCK_SIZE);
     }
 
+    // Decode.
     decoded_bitmap = decode_data(encoded_bitmap);
     const char *decoded_buf = decoded_bitmap.c_str();
-    // printf(">>>block_manager::decode_bitmap: old bitmap part 1\n"); //###
-    // print_string_hex(get_disk_ptr() + 2 * BLOCK_SIZE, BITMAP_BLOCKS * BLOCK_SIZE); //###
-    // printf(">>>block_manager::decode_bitmap: old bitmap part 2\n"); //###
-    // print_string_hex(get_disk_ptr() + (2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS) * BLOCK_SIZE,
-    //     ENCODE_EXTRA_SIZE(BITMAP_BLOCKS * BLOCK_SIZE)); //###
-    // printf(">>>block_manager::decode_bitmap: read at %d, write at %d\n",
-    //     2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE(bblock - 2), bblock); //###
-    // printf(">>>block_manager::decode_bitmap: encoded size = %d\n", (int)encoded_bitmap.length()); //###
-    // print_string_hex(encoded_bitmap.c_str(), encoded_bitmap.length()); //###
-    // printf(">>>block_manager::decode_bitmap: decoded size = %d\n", (int)decoded_bitmap.length()); //###
-    // print_string_hex(decoded_bitmap.c_str(), decoded_bitmap.length()); //###
 
+    // Write decoded bitmap data to its block.
     write_block(bblock, decoded_buf);
-
-    // printf(">>>block_manager::decode_bitmap: new bitmap part 1\n"); //###
-    // print_string_hex(get_disk_ptr() + 2 * BLOCK_SIZE, BITMAP_BLOCKS * BLOCK_SIZE); //###
-    // printf(">>>block_manager::decode_bitmap: new bitmap part 2\n"); //###
-    // print_string_hex(get_disk_ptr() + (2 + BITMAP_BLOCKS + INODE_TABLE_BLOCKS) * BLOCK_SIZE,
-    //     ENCODE_EXTRA_SIZE(BITMAP_BLOCKS * BLOCK_SIZE)); //###
 }
 
 int block_manager::least_available_in_block(const char *block_buf) // Return lowest '0' position in a block.
@@ -342,7 +301,6 @@ blockid_t block_manager::alloc_block()
      */
 
     assert(pthread_mutex_lock(&block_manager_mutex) == 0);
-
     decode_bitmap_all();
 
     int newid = find_available_slot();
@@ -351,12 +309,10 @@ blockid_t block_manager::alloc_block()
         exit(-1);
     }
 
-    printf(">>> block_manager::alloc_block: allocated new block %d\n", newid); // ###
 
     mark_as_allocated(newid);
 
     encode_bitmap_all();
-
     assert(pthread_mutex_unlock(&block_manager_mutex) == 0);
 
     return newid;
@@ -373,20 +329,16 @@ void block_manager::free_block(uint32_t id)
         return;
 
     assert(pthread_mutex_lock(&block_manager_mutex) == 0);
-
     decode_bitmap(BBLOCK(id));
-
-    printf(">>> block_manager::free_block: freed block %d\n", id); // ###
 
     mark_as_free(id);
 
     encode_bitmap(BBLOCK(id));
-
     assert(pthread_mutex_unlock(&block_manager_mutex) == 0);
 }
 
-// The layout of disk should be like this:
-// |<-boot->|<-sb->|<-free block bitmap->|<-inode table->|<-data->|
+// The layout of disk is like this:
+// |<-boot->|<-sb->|<-free block bitmap->|<-inode table->|<-bitmap encoding->|<-inode table encoding->|<-data->|
 block_manager::block_manager()
 {
     d = new disk();
@@ -430,8 +382,10 @@ void block_manager::write_block(uint32_t id, const char *buf)
 inode_manager::inode_manager()
 {
     bm = new block_manager();
+
     assert(pthread_mutex_init(&inode_manager_mutex, NULL) == 0);
     encode_inode_table_all();
+
     uint32_t root_dir = alloc_inode(extent_protocol::T_DIR);
     if (root_dir != 1) {
         printf("\tim: error! alloc first inode %d, should be 1\n", root_dir);
@@ -447,103 +401,67 @@ inode_manager::~inode_manager()
     delete bm;
 }
 
+// Encode all inode table blocks.
 void inode_manager::encode_inode_table_all()
 {
-    for (int i = 1; i <= INODE_NUM; ++i)
-        encode_inode_table(i);
+    for (int i = 1; i <= INODE_TABLE_BLOCKS; ++i)
+        encode_inode_table(1 + BITMAP_BLOCKS + i);
 }
 
+// Decode all inode table blocks.
 void inode_manager::decode_inode_table_all()
 {
-    for (int i = 1; i <= INODE_NUM; ++i)
-        decode_inode_table(i);
+    for (int i = 1; i <= INODE_TABLE_BLOCKS; ++i)
+        decode_inode_table(1 + BITMAP_BLOCKS + i);
 }
 
-void inode_manager::encode_inode_table(uint32_t inum)
+// Encode a specified inode table block.
+void inode_manager::encode_inode_table(uint32_t iblock)
 {
     std::string inode_table_data, encoded_inode_table;
     char buf[BLOCK_SIZE];
 
-    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
+    // Read original inode table data.
+    bm->read_block(iblock, buf);
     inode_table_data = std::string(buf, BLOCK_SIZE);
 
+    // Apply encoding.
     encoded_inode_table = encode_data(inode_table_data);
     const char *encoded_buf = encoded_inode_table.c_str();
-    // printf(">>>inode_manager::encode_inode_table: old disk block 6\n"); //###
-    // print_string_hex(get_disk_ptr() + 6 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: old disk block 7\n"); //###
-    // print_string_hex(get_disk_ptr() + 7 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: old disk block 1046-1049\n"); //###
-    // print_string_hex(get_disk_ptr() + 1046 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: old disk block 1050-1053\n"); //###
-    // print_string_hex(get_disk_ptr() + 1050 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: read start at %d\n", (int)IBLOCK(inum, bm->sb.nblocks)); //###
-    // printf(">>>inode_manager::encode_inode_table: original size = %d\n", (int)inode_table_data.length()); //###
-    // print_string_hex(inode_table_data.c_str(), inode_table_data.length()); //###
-    // printf(">>>inode_manager::encode_inode_table: encoded size = %d\n", (int)encoded_inode_table.length()); //###
-    // print_string_hex(encoded_inode_table.c_str(), encoded_inode_table.length()); //###
-    // printf(">>>inode_manager::encode_inode_table: write start at %d\n",
-    //     (int)(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE((inum - 1) / IPB))); //###
 
-    bm->write_block(IBLOCK(inum, bm->sb.nblocks), encoded_buf);
+    // Write encoded inode table data to its corresponding positions.
+    bm->write_block(iblock, encoded_buf);
     encoded_buf += BLOCK_SIZE;
 
     for (int i = 0; i < ENCODE_EXTRA_SIZE(1); ++i) {
-        bm->write_block(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE((inum - 1) / IPB) + i,
-            encoded_buf);
+        bm->write_block(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS
+            + ENCODE_EXTRA_SIZE(iblock - 2 - BITMAP_BLOCKS) + i, encoded_buf);
         encoded_buf += BLOCK_SIZE;
     }
-    // printf(">>>inode_manager::encode_inode_table: new disk block 6\n"); //###
-    // print_string_hex(get_disk_ptr() + 6 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: new disk block 7\n"); //###
-    // print_string_hex(get_disk_ptr() + 7 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: new disk block 1046-1049\n"); //###
-    // print_string_hex(get_disk_ptr() + 1046 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::encode_inode_table: new disk block 1050-1053\n"); //###
-    // print_string_hex(get_disk_ptr() + 1050 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
 }
 
-void inode_manager::decode_inode_table(uint32_t inum)
+// Decode a specified inode table block.
+void inode_manager::decode_inode_table(uint32_t iblock)
 {
     std::string encoded_inode_table, decoded_inode_table;
     char buf[BLOCK_SIZE];
 
-    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
+    // Read encoded inode table data from its corresponding positions.
+    bm->read_block(iblock, buf);
     encoded_inode_table += std::string(buf, BLOCK_SIZE);
 
     for (int i = 0; i < ENCODE_EXTRA_SIZE(1); ++i) {
-        bm->read_block(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE((inum - 1) / IPB) + i,
-            buf);
+        bm->read_block(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS
+            + ENCODE_EXTRA_SIZE(iblock - 2 - BITMAP_BLOCKS) + i, buf);
         encoded_inode_table += std::string(buf, BLOCK_SIZE);
     }
 
+    // Decode.
     decoded_inode_table = decode_data(encoded_inode_table);
     const char *decoded_buf = decoded_inode_table.c_str();
-    // printf(">>>inode_manager::decode_inode_table: old disk block 6\n"); //###
-    // print_string_hex(get_disk_ptr() + 6 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: old disk block 7\n"); //###
-    // print_string_hex(get_disk_ptr() + 7 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: old disk block 1046-1049\n"); //###
-    // print_string_hex(get_disk_ptr() + 1046 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: old disk block 1050-1053\n"); //###
-    // print_string_hex(get_disk_ptr() + 1050 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: read start at %d\n",
-    //     (int)(2 + ENCODED_SIZE(BITMAP_BLOCKS) + INODE_TABLE_BLOCKS + ENCODE_EXTRA_SIZE((inum - 1) / IPB))); //###
-    // printf(">>>inode_manager::decode_inode_table: encoded size = %d\n", (int)encoded_inode_table.length()); //###
-    // print_string_hex(encoded_inode_table.c_str(), encoded_inode_table.length()); //###
-    // printf(">>>inode_manager::decode_inode_table: decoded size = %d\n", (int)decoded_inode_table.length()); //###
-    // print_string_hex(decoded_inode_table.c_str(), decoded_inode_table.length()); //###
-    // printf(">>>inode_manager::decode_inode_table: write start at %d\n", (int)IBLOCK(inum, bm->sb.nblocks)); //###
 
-    bm->write_block(IBLOCK(inum, bm->sb.nblocks), decoded_buf);
-    // printf(">>>inode_manager::decode_inode_table: new disk block 6\n"); //###
-    // print_string_hex(get_disk_ptr() + 6 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: new disk block 7\n"); //###
-    // print_string_hex(get_disk_ptr() + 7 * BLOCK_SIZE, BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: new disk block 1046-1049\n"); //###
-    // print_string_hex(get_disk_ptr() + 1046 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
-    // printf(">>>inode_manager::decode_inode_table: new disk block 1050-1053\n"); //###
-    // print_string_hex(get_disk_ptr() + 1050 * BLOCK_SIZE, 4 * BLOCK_SIZE); //###
+    // Write decoded inode table data to its block.
+    bm->write_block(iblock, decoded_buf);
 }
 
 /* Create a new file.
@@ -564,7 +482,6 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
     inode_t *ino;
 
     assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
-
     decode_inode_table_all();
 
     // Find the least available inode number.
@@ -580,8 +497,6 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
         exit(-1);
     }
 
-    printf(">>>inode_manager::alloc_inode allocated new inode %d\n", newinum); //###
-
     // Initialize the inode.
     bzero(ino, sizeof(inode_t));
     ino->type = type;
@@ -592,7 +507,6 @@ uint32_t inode_manager::alloc_inode(uint32_t type)
     bm->write_block(pos, buf);
 
     encode_inode_table_all();
-
     assert(pthread_mutex_unlock(&inode_manager_mutex) == 0);
 
     return newinum;
@@ -610,22 +524,18 @@ void inode_manager::free_inode(uint32_t inum)
     if (inum < 1 || inum > INODE_NUM)
         return;
 
-    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
-
-    decode_inode_table(inum);
-
     char buf[BLOCK_SIZE];
     int pos = IBLOCK(inum, bm->sb.nblocks);
+
+    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
+    decode_inode_table(pos);
 
     bm->read_block(pos, buf);
     inode_t *ino = (inode_t*)buf + (inum - 1) % IPB;
     ino->type = 0; // Set inode type to 0 to mark its number as free.
     bm->write_block(pos, buf);
 
-    printf(">>>inode_manager::free_inode freed inode %d\n", inum); //###
-
-    encode_inode_table(inum);
-
+    encode_inode_table(pos);
     assert(pthread_mutex_unlock(&inode_manager_mutex) == 0);
 }
 
@@ -636,40 +546,35 @@ struct inode* inode_manager::get_inode(uint32_t inum)
     struct inode *ino, *ino_disk;
     char buf[BLOCK_SIZE];
 
-    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
-
-    decode_inode_table(inum);
-
     printf("\tim: get_inode %d\n", inum);
 
     if (inum < 1 || inum > INODE_NUM) {
         printf("\tim: inum out of range\n");
-        ino = NULL;
-        goto release;
+        return NULL;
     }
 
-    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
-    // printf("%s:%d\n", __FILE__, __LINE__);
+    int pos = IBLOCK(inum, bm->sb.nblocks);
+
+    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
+    decode_inode_table(pos);
+
+    bm->read_block(pos, buf);
 
     ino_disk = (struct inode*)buf + (inum - 1) % IPB;
     if (ino_disk->type == 0) {
         printf("\tim: inode not exist\n");
         ino = NULL;
-        goto release;
+    } else {
+        ino = (struct inode*)malloc(sizeof(struct inode));
+        if (!ino) {
+            printf("Error: malloc failed\n");
+            exit(-1);
+        }
+
+        *ino = *ino_disk;
     }
 
-    ino = (struct inode*)malloc(sizeof(struct inode));
-
-    if (!ino) {
-        printf("Error: malloc failed\n");
-        exit(-1);
-    }
-
-    *ino = *ino_disk;
-
-release:
-    encode_inode_table(inum);
-
+    encode_inode_table(pos);
     assert(pthread_mutex_unlock(&inode_manager_mutex) == 0);
 
     return ino;
@@ -680,30 +585,37 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
     char buf[BLOCK_SIZE];
     struct inode *ino_disk;
 
-    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
-
-    decode_inode_table(inum);
-
     printf("\tim: put_inode %d\n", inum);
 
     if (inum < 1 || inum > INODE_NUM) {
         printf("\tim: inum out of range\n");
-        goto release;
+        return;
     }
 
     if (ino == NULL)
-        goto release;
+        return;
 
-    bm->read_block(IBLOCK(inum, bm->sb.nblocks), buf);
+    int pos = IBLOCK(inum, bm->sb.nblocks);
+
+    assert(pthread_mutex_lock(&inode_manager_mutex) == 0);
+    decode_inode_table(pos);
+
+    bm->read_block(pos, buf);
     ino_disk = (struct inode*)buf + (inum - 1) % IPB;
     *ino_disk = *ino;
-    bm->write_block(IBLOCK(inum, bm->sb.nblocks), buf);
+    bm->write_block(pos, buf);
 
-release:
-    encode_inode_table(inum);
-
+    encode_inode_table(pos);
     assert(pthread_mutex_unlock(&inode_manager_mutex) == 0);
 }
+
+/* NOTE: Indirect blocks are also part of a file's metadata, but it resides in the data area.
+ * Implementing fault tolerance for indirect blocks will require the inode to store
+ * the extra block numbers for replica (encoding) of indirect blocks.
+ * It is not hard to implement this in principle, but the code may become uglier.
+ * Also, fault tolerance for indirect blocks is not tested by the test program.
+ * As a result, this is not implemented right now.
+ */
 
 void inode_manager::get_blockids(const inode_t *ino, blockid_t *bids, int cnt) // Get first cnt block ids from an inode.
 {
@@ -787,7 +699,7 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     // Get block ids of the inode.
     get_blockids(ino, read_blockids, total_blocks);
 
-    // Read data and transfer to returned data pointer.
+    // Read encoded file data.
     for (int i = 0; i < whole_blocks; ++i)
         bm->read_block(read_blockids[i], encoded_buf + i * BLOCK_SIZE);
 
@@ -796,13 +708,8 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
         memcpy(encoded_buf + whole_blocks * BLOCK_SIZE, buf, last_bytes);
     }
 
+    // Decode data and transfer to returned data pointer.
     std::string decoded_data = decode_data(std::string(encoded_buf, encoded_size));
-    // printf(">>> In read file: inum = %u, encoded data = (%d) %s\n", inum, encoded_size, encoded_buf); //###
-    printf(">>> In read file: inum = %u, encoded data size = (%d)\n", inum, encoded_size); //###
-    // print_string_hex(encoded_buf, encoded_size); // ###
-    // printf(">>> In read file: inum = %u, decoded data = (%d) %s\n", inum, (int)decoded_data.length(), decoded_data.c_str()); //###
-    printf(">>> In read file: inum = %u, decoded data size = (%d)\n", inum, (int)decoded_data.length()); //###
-    // print_string_hex(decoded_data.c_str(), decoded_data.length()); // ###
     free(encoded_buf);
     memcpy(*buf_out, decoded_data.c_str(), decoded_data.length());
 
@@ -810,6 +717,7 @@ void inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     ino->atime = (unsigned int)time(NULL);
     put_inode(inum, ino);
 
+    // Write back the file (encode it again to fix possible errors, but do not set timestamps again).
     write_file(inum, decoded_data.c_str(), decoded_data.length(), false);
 
     // Free memory allocated by get_inode().
@@ -849,7 +757,7 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size, bool se
     int new_block_num = CEIL_DIV(new_encoded_size, BLOCK_SIZE);
     if (new_block_num > MAXFILE) {
         printf("Error: file too large");
-        exit(-1);
+        return;
     }
     int diff_num;
 
@@ -870,17 +778,11 @@ void inode_manager::write_file(uint32_t inum, const char *buf, int size, bool se
             bm->free_block(ino->blocks[NDIRECT]);
     }
 
-    // Write data to data blocks.
+    // Encode and write data to data blocks.
     int whole_blocks = new_encoded_size / BLOCK_SIZE;
     int last_bytes = new_encoded_size % BLOCK_SIZE;
     std::string encoded_string = encode_data(std::string(buf, size));
     const char *encoded_buf = encoded_string.c_str();
-    // printf(">>> In write file: inum = %u, original data = (%d) %s\n", inum, size, buf); //###
-    printf(">>> In write file: inum = %u, original data size = (%d)\n", inum, size); //###
-    // print_string_hex(buf, size); //###
-    // printf(">>> In write file: inum = %u, encoded data = (%d) %s\n", inum, encoded_string.length(), encoded_buf); //###
-    printf(">>> In write file: inum = %u, encoded data size = (%d)\n", inum, (int)encoded_string.length()); //###
-    // print_string_hex(encoded_buf, encoded_string.length()); //###
 
     for (int i = 0; i < whole_blocks; ++i)
         bm->write_block(new_blockids[i], encoded_buf + i * BLOCK_SIZE);

@@ -19,9 +19,8 @@
 
 typedef uint32_t blockid_t;
 
-// redundant encode and decode for fault tolerance
-
-#define ENCODE_FACTOR 4
+// Encode and decode (redundant) algorithm for fault tolerance.
+#define ENCODE_FACTOR 4 // Encoded data size / Original data size
 #define ENCODED_SIZE(x) ((x) * ENCODE_FACTOR)
 #define ENCODE_EXTRA_SIZE(x) ((x) * (ENCODE_FACTOR - 1))
 typedef unsigned char byte;
@@ -62,7 +61,7 @@ class block_manager {
 private:
     disk *d;
     std::map <uint32_t, int> using_blocks;
-    pthread_mutex_t block_manager_mutex;
+    pthread_mutex_t block_manager_mutex; // Used to protect atomicity during bitmap manipulation.
     void encode_bitmap_all();
     void decode_bitmap_all();
     void encode_bitmap(uint32_t bblock);
@@ -94,15 +93,15 @@ public:
 #define IPB 1
 //(BLOCK_SIZE / sizeof(struct inode))
 
+// Bitmap bits per block
+#define BPB (BLOCK_SIZE * 8)
+
 // Block containing inode i
 //#define IBLOCK(i, nblocks) ((nblocks)/BPB + (i)/IPB + 3) // Suspect wrong
 #define IBLOCK(i, nblocks) ((nblocks) / BPB + (i) / IPB + 1)
 
 // The number of blocks for inode table
 #define INODE_TABLE_BLOCKS (CEIL_DIV(INODE_NUM, IPB))
-
-// Bitmap bits per block
-#define BPB (BLOCK_SIZE * 8)
 
 // The number of blocks for bitmap
 #define BITMAP_BLOCKS (BLOCK_NUM / BPB)
@@ -111,8 +110,8 @@ public:
 #define BBLOCK(b) ((b) / BPB + 2)
 
 /* The number of reserved blocks, including:
- * boot block and super block
- * bitmap blocks and blocks for inode table (along with blocks for their fault tolerance encoding).
+ * - boot block and super block
+ * - bitmap blocks and blocks for inode table (along with blocks for their fault tolerance encoding)
  */
 #define RESERVED_BLOCKS_NUM (2 + ENCODED_SIZE(BITMAP_BLOCKS + INODE_TABLE_BLOCKS))
 
@@ -137,7 +136,7 @@ private:
     block_manager *bm;
     bool uncommitted;
     int current_version;
-    pthread_mutex_t inode_manager_mutex;
+    pthread_mutex_t inode_manager_mutex; // Used to protect atomicity during inode table manipulation.
     void encode_inode_table_all();
     void decode_inode_table_all();
     void encode_inode_table(uint32_t inum);

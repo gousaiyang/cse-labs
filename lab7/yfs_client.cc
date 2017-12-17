@@ -101,6 +101,7 @@ int yfs_client::readdir_p(inum dir, std::list<dirent> &list)
         // Read inode number.
         if (!ist.read((char*)&de.inum, sizeof(inum)))
             break;
+
         list.push_back(de);
     }
 

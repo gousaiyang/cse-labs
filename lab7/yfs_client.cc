@@ -88,7 +88,6 @@ int yfs_client::readdir_p(inum dir, std::list<dirent> &list)
 
     ist.str(content);
 
-    // std::cout << ">>> yfs_client::readdir_p start" << std::endl; //###
     while (ist.get(c)) { // Read next file name length.
         namelen = (int)(unsigned char)c;
 
@@ -102,10 +101,8 @@ int yfs_client::readdir_p(inum dir, std::list<dirent> &list)
         // Read inode number.
         if (!ist.read((char*)&de.inum, sizeof(inum)))
             break;
-        // std::cout << ">>> yfs_client::readdir_p inum = " << dir << " " << de.name << " -> " << de.inum << std::endl; //###
         list.push_back(de);
     }
-    // std::cout << ">>> yfs_client::readdir_p end" << std::endl; //###
 
 release:
     return r;

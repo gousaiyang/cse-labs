@@ -21,8 +21,9 @@ typedef uint32_t blockid_t;
 
 // redundant encode and decode for fault tolerance
 
-#define ENCODED_SIZE(x) ((x) * 5)
-#define ENCODE_EXTRA_SIZE(x) ((x) * 4)
+#define ENCODE_FACTOR 5
+#define ENCODED_SIZE(x) ((x) * ENCODE_FACTOR)
+#define ENCODE_EXTRA_SIZE(x) ((x) * (ENCODE_FACTOR - 1))
 typedef unsigned char byte;
 inline byte bit_expand(byte c, int pos, int range);
 inline bool get_bit(byte c, int pos);
@@ -60,7 +61,11 @@ class block_manager {
 private:
     disk *d;
     std::map <uint32_t, int> using_blocks;
-    pthread_mutex_t alloc_block_mutex; // Mutex to guarantee alloc_block() atomicity.
+    pthread_mutex_t block_manager_mutex;
+    void encode_bitmap_all();
+    void decode_bitmap_all();
+    void encode_bitmap(uint32_t bblock);
+    void decode_bitmap(uint32_t bblock);
     int least_available_in_block(const char *block_buf);
     int find_available_slot();
     void mark_as_allocated(uint32_t id);
@@ -79,6 +84,9 @@ public:
 
 // inode layer -----------------------------------------
 
+// Mathematically ceil(x / y)
+#define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
+
 #define INODE_NUM 1024
 
 // Inodes per block.
@@ -89,6 +97,9 @@ public:
 //#define IBLOCK(i, nblocks) ((nblocks)/BPB + (i)/IPB + 3) // Suspect wrong
 #define IBLOCK(i, nblocks) ((nblocks) / BPB + (i) / IPB + 1)
 
+// The number of blocks for inode table
+#define INODE_TABLE_BLOCKS (CEIL_DIV(INODE_NUM, IPB))
+
 // Bitmap bits per block
 #define BPB (BLOCK_SIZE * 8)
 
@@ -98,13 +109,16 @@ public:
 // Block containing bit for block b
 #define BBLOCK(b) ((b) / BPB + 2)
 
+/* The number of reserved blocks, including:
+ * boot block and super block
+ * bitmap blocks and blocks for inode table (along with blocks for their fault tolerance encoding).
+ */
+#define RESERVED_BLOCKS_NUM (2 + ENCODED_SIZE(BITMAP_BLOCKS + INODE_TABLE_BLOCKS))
+
 // Direct/indirect blocks number
 #define NDIRECT 100
 #define NINDIRECT (BLOCK_SIZE / sizeof(uint))
 #define MAXFILE (NDIRECT + NINDIRECT)
-
-// Mathematically ceil(x / y)
-#define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
 
 typedef struct inode {
     //short type;
@@ -122,6 +136,11 @@ private:
     block_manager *bm;
     bool uncommitted;
     int current_version;
+    pthread_mutex_t inode_manager_mutex;
+    void encode_inode_table_all();
+    void decode_inode_table_all();
+    void encode_inode_table(uint32_t inum);
+    void decode_inode_table(uint32_t inum);
     struct inode* get_inode(uint32_t inum);
     void put_inode(uint32_t inum, struct inode *ino);
     void get_blockids(const inode_t *ino, blockid_t *bids, int cnt);

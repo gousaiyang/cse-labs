@@ -609,7 +609,7 @@ void inode_manager::put_inode(uint32_t inum, struct inode *ino)
     assert(pthread_mutex_unlock(&inode_manager_mutex) == 0);
 }
 
-/* NOTE: Indirect blocks are also part of a file's metadata, but it resides in the data area.
+/* NOTE: Indirect blocks are also part of a file's metadata, but they reside in the data area.
  * Implementing fault tolerance for indirect blocks will require the inode to store
  * the extra block numbers for replica (encoding) of indirect blocks.
  * It is not hard to implement this in principle, but the code may become uglier.

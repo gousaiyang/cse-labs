@@ -21,14 +21,15 @@ typedef uint32_t blockid_t;
 
 // redundant encode and decode for fault tolerance
 
-#define ENCODE_FACTOR 5
+#define ENCODE_FACTOR 4
 #define ENCODED_SIZE(x) ((x) * ENCODE_FACTOR)
 #define ENCODE_EXTRA_SIZE(x) ((x) * (ENCODE_FACTOR - 1))
 typedef unsigned char byte;
-inline byte bit_expand(byte c, int pos, int range);
 inline bool get_bit(byte c, int pos);
-inline bool voter_5(bool x1, bool x2, bool x3, bool x4, bool x5);
+inline bool voter_3(bool x1, bool x2, bool x3);
 inline byte construct_byte(bool b0, bool b1, bool b2, bool b3, bool b4, bool b5, bool b6, bool b7);
+inline byte encode2to8(bool b0, bool b1);
+inline void decode2to8(byte data, bool &b0, bool &b1);
 std::string encode_data(const std::string &data);
 std::string decode_data(const std::string &data);
 

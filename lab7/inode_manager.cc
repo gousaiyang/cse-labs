@@ -27,24 +27,16 @@ void print_string_hex(const char* buf, int size) //###
     printf("\n---hex end---\n");
 }
 
-/* Fill a byte (b0b1b2b3b4b5b6b7) with one of its bits in a given range (place 0 at other positions).
- * Example: bit_expand(0b00100000, 2, 0b00111100) = 0b00111100
- */
-inline byte bit_expand(byte c, int pos, int range)
-{
-    return (byte)(((int)c << (pos + 24) >> 31) & range);
-}
-
 // Extract a bit from a byte (b0b1b2b3b4b5b6b7) at the given position.
 inline bool get_bit(byte c, int pos)
 {
     return (bool)(c & (1 << (7 - pos)));
 }
 
-// Find majority of 5 bits.
-inline bool voter_5(bool x1, bool x2, bool x3, bool x4, bool x5)
+// Find majority of 3 bits.
+inline bool voter_3(bool x1, bool x2, bool x3)
 {
-    return x1 + x2 + x3 + x4 + x5 >= 3;
+    return x1 + x2 + x3 >= 2;
 }
 
 // Construct a byte (b0b1b2b3b4b5b6b7) from 8 bits.
@@ -53,51 +45,76 @@ inline byte construct_byte(bool b0, bool b1, bool b2, bool b3, bool b4, bool b5,
     return (byte)(b0 << 7 | b1 << 6 | b2 << 5 | b3 << 4 | b4 << 3 | b5 << 2 | b6 << 1 | b7);
 }
 
-/* For every byte b0b1b2b3b4b5b6b7, encoded result is 5 bytes as follows:
- * b0b0b0b0b0b1b1b1 b1b1b2b2b2b2b2b3 b3b3b3b3b4b4b4b4 b4b5b5b5b5b5b6b6 b6b6b6b7b7b7b7b7
- */
+// Encode two bits b0b1 to b0,b0,b0,b1,b1,b1,b0^b1,b0^b1
+inline byte encode2to8(bool b0, bool b1)
+{
+    return construct_byte(b0, b0, b0, b1, b1, b1, b0 ^ b1, b0 ^ b1);
+}
+
+// Decode the above encoding, every byte can tolerate 2 bit flips.
+inline void decode2to8(byte data, bool &b0, bool &b1)
+{
+    bool bit0 = get_bit(data, 0);
+    bool bit1 = get_bit(data, 1);
+    bool bit2 = get_bit(data, 2);
+    bool bit3 = get_bit(data, 3);
+    bool bit4 = get_bit(data, 4);
+    bool bit5 = get_bit(data, 5);
+    bool bit6 = get_bit(data, 6);
+    bool bit7 = get_bit(data, 7);
+
+    bool b0_agree = (bit0 == bit1 && bit1 == bit2);
+    bool b1_agree = (bit3 == bit4 && bit4 == bit5);
+    bool xor_agree = (bit6 == bit7);
+
+    if (b0_agree == b1_agree || !xor_agree) {
+        b0 = voter_3(bit0, bit1, bit2);
+        b1 = voter_3(bit3, bit4, bit5);
+    } else if (b0_agree) {
+        b0 = bit0;
+        b1 = bit0 ^ bit6;
+    } else {
+        b0 = bit3 ^ bit6;
+        b1 = bit3;
+    }
+}
+
+// Apply encode2to8 to byte stream.
 std::string encode_data(const std::string &data)
 {
     std::string result;
     int len = data.length();
 
     for (int i = 0; i < len; ++i) {
-        result.push_back(bit_expand(data[i], 0, 0xf8) | bit_expand(data[i], 1, 0x7));
-        result.push_back(bit_expand(data[i], 1, 0xc0) | bit_expand(data[i], 2, 0x3e) | bit_expand(data[i], 3, 0x1));
-        result.push_back(bit_expand(data[i], 3, 0xf0) | bit_expand(data[i], 4, 0xf));
-        result.push_back(bit_expand(data[i], 4, 0x80) | bit_expand(data[i], 5, 0x7c) | bit_expand(data[i], 6, 0x3));
-        result.push_back(bit_expand(data[i], 6, 0xe0) | bit_expand(data[i], 7, 0x1f));
+        byte b = data[i];
+        result.push_back(encode2to8(get_bit(b, 0), get_bit(b, 1)));
+        result.push_back(encode2to8(get_bit(b, 2), get_bit(b, 3)));
+        result.push_back(encode2to8(get_bit(b, 4), get_bit(b, 5)));
+        result.push_back(encode2to8(get_bit(b, 6), get_bit(b, 7)));
     }
 
     return result;
 }
 
+// Apply decode2to8 to byte stream.
 std::string decode_data(const std::string &data)
 {
     int len = data.length();
-    if (len % 5) {
-        printf("Error: encoded data size should be a multiple of 5");
+    if (len % 4) {
+        printf("Error: encoded data size should be a multiple of 4");
         exit(-1);
         return std::string();
     }
 
-    int parts = len / 5;
+    int parts = len / 4;
     std::string result;
     for (int i = 0; i < parts; ++i) {
-        int byte0 = data[i * 5];
-        int byte1 = data[i * 5 + 1];
-        int byte2 = data[i * 5 + 2];
-        int byte3 = data[i * 5 + 3];
-        int byte4 = data[i * 5 + 4];
-        bool bit0 = voter_5(get_bit(byte0, 0), get_bit(byte0, 1), get_bit(byte0, 2), get_bit(byte0, 3), get_bit(byte0, 4));
-        bool bit1 = voter_5(get_bit(byte0, 5), get_bit(byte0, 6), get_bit(byte0, 7), get_bit(byte1, 0), get_bit(byte1, 1));
-        bool bit2 = voter_5(get_bit(byte1, 2), get_bit(byte1, 3), get_bit(byte1, 4), get_bit(byte1, 5), get_bit(byte1, 6));
-        bool bit3 = voter_5(get_bit(byte1, 7), get_bit(byte2, 0), get_bit(byte2, 1), get_bit(byte2, 2), get_bit(byte2, 3));
-        bool bit4 = voter_5(get_bit(byte2, 4), get_bit(byte2, 5), get_bit(byte2, 6), get_bit(byte2, 7), get_bit(byte3, 0));
-        bool bit5 = voter_5(get_bit(byte3, 1), get_bit(byte3, 2), get_bit(byte3, 3), get_bit(byte3, 4), get_bit(byte3, 5));
-        bool bit6 = voter_5(get_bit(byte3, 6), get_bit(byte3, 7), get_bit(byte4, 0), get_bit(byte4, 1), get_bit(byte4, 2));
-        bool bit7 = voter_5(get_bit(byte4, 3), get_bit(byte4, 4), get_bit(byte4, 5), get_bit(byte4, 6), get_bit(byte4, 7));
-        result.push_back(construct_byte(bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7));
+        bool b0, b1, b2, b3, b4, b5, b6, b7;
+        decode2to8(data[i * 4], b0, b1);
+        decode2to8(data[i * 4 + 1], b2, b3);
+        decode2to8(data[i * 4 + 2], b4, b5);
+        decode2to8(data[i * 4 + 3], b6, b7);
+        result.push_back(construct_byte(b0, b1, b2, b3, b4, b5, b6, b7));
     }
 
     return result;

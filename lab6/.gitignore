@@ -1,0 +1,7 @@
+*.o
+*.d
+*.tgz
+*.log
+lock_server
+config
+rsm_tester

@@ -7,8 +7,8 @@
 
 // This module implements the proposer and acceptor of the Paxos
 // distributed algorithm as described by Lamport's "Paxos Made
-// Simple".  To kick off an instance of Paxos, the caller supplies a
-// list of nodes, a proposed value, and invokes the proposer.  If the
+// Simple". To kick off an instance of Paxos, the caller supplies a
+// list of nodes, a proposed value, and invokes the proposer. If the
 // majority of the nodes agree on the proposed value after running
 // this instance of Paxos, the acceptor invokes the upcall
 // paxos_commit to inform higher layers of the agreed value for this
@@ -139,7 +139,39 @@ bool proposer::prepare(unsigned instance, std::vector<std::string> &accepts, std
     // You fill this in for Lab 6
     // Note: if got an "oldinstance" reply, commit the instance using
     // acc->commit(...), and return false.
-    return false;
+
+    paxos_protocol::status ret;
+    paxos_protocol::preparearg ppa;
+    paxos_protocol::prepareres ppr;
+    prop_t max_n_a;
+
+    ppa.instance = instance;
+    ppa.n = my_n;
+    max_n_a.n = 0;
+
+    int nodes_num = nodes.size();
+    for (int i = 0; i < nodes_num; ++i) {
+        handle h(nodes[i]);
+        rpcc *cl = h.safebind();
+        if (cl) {
+            ret = cl->call(paxos_protocol::preparereq, me, ppa, ppr, rpcc::to(1000));
+            if (ret == paxos_protocol::OK) {
+                if (ppr.oldinstance) {
+                    acc->commit(instance, ppr.v_a);
+                    return false;
+                }
+                if (ppr.accept) {
+                    accepts.push_back(nodes[i]);
+                    if (ppr.n_a > max_n_a) {
+                        max_n_a = ppr.n_a;
+                        v = ppr.v_a;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
 }
 
 // run() calls this to send out accept RPCs to accepts.
@@ -147,11 +179,45 @@ bool proposer::prepare(unsigned instance, std::vector<std::string> &accepts, std
 void proposer::accept(unsigned instance, std::vector<std::string> &accepts, std::vector<std::string> nodes, std::string v)
 {
     // You fill this in for Lab 6
+
+    paxos_protocol::status ret;
+    paxos_protocol::acceptarg aca;
+    bool acr; // accept response
+
+    aca.instance = instance;
+    aca.n = my_n;
+    aca.v = v;
+
+    int nodes_num = nodes.size();
+    for (int i = 0; i < nodes_num; ++i) {
+        handle h(nodes[i]);
+        rpcc *cl = h.safebind();
+        if (cl) {
+            ret = cl->call(paxos_protocol::acceptreq, me, aca, acr, rpcc::to(1000));
+            if (ret == paxos_protocol::OK && acr)
+                accepts.push_back(nodes[i]);
+        }
+    }
 }
 
 void proposer::decide(unsigned instance, std::vector<std::string> accepts, std::string v)
 {
     // You fill this in for Lab 6
+
+    paxos_protocol::status ret;
+    paxos_protocol::decidearg dca;
+    int dcr; // dummy decide response
+
+    dca.instance = instance;
+    dca.v = v;
+
+    int nodes_num = accepts.size();
+    for (int i = 0; i < nodes_num; ++i) {
+        handle h(accepts[i]);
+        rpcc *cl = h.safebind();
+        if (cl)
+            ret = cl->call(paxos_protocol::decidereq, me, dca, dcr, rpcc::to(1000));
+    }
 }
 
 acceptor::acceptor(class paxos_change *_cfg, bool _first, std::string _me, std::string _value)
@@ -184,8 +250,26 @@ paxos_protocol::status acceptor::preparereq(std::string src, paxos_protocol::pre
     // You fill this in for Lab 6
     // Remember to initialize *BOTH* r.accept and r.oldinstance appropriately.
     // Remember to *log* the proposal if the proposal is accepted.
-    return paxos_protocol::OK;
 
+    if (a.instance <= instance_h) {
+        r.oldinstance = true;
+        r.v_a = values[a.instance];
+        return paxos_protocol::OK;
+    }
+
+    r.oldinstance = false;
+
+    if (a.n > n_h) {
+        n_h = a.n;
+        r.accept = true;
+        r.n_a = n_a;
+        r.v_a = v_a;
+        l->logprop(n_h);
+        return paxos_protocol::OK;
+    }
+
+    r.accept = false;
+    return paxos_protocol::OK;
 }
 
 // the src argument is only for debug purpose
@@ -194,6 +278,15 @@ paxos_protocol::status acceptor::acceptreq(std::string src, paxos_protocol::acce
     // You fill this in for Lab 6
     // Remember to *log* the accept if the proposal is accepted.
 
+    if (a.n >= n_h) {
+        n_a = a.n;
+        v_a = a.v;
+        r = true;
+        l->logaccept(n_a, v_a);
+        return paxos_protocol::OK;
+    }
+
+    r = false;
     return paxos_protocol::OK;
 }
 
